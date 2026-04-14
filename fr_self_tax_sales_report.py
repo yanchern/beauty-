@@ -44,6 +44,11 @@ EU_COUNTRIES = {
     "SK",
 }
 
+UK_TAX_DIVISOR = Decimal("1.2")
+UK_TAX_RATE = Decimal("0.2")
+IT_TAX_DIVISOR = Decimal("1.22")
+IT_TAX_RATE = Decimal("0.22")
+
 
 @dataclass(frozen=True)
 class RuleContext:
@@ -60,6 +65,12 @@ class RuleSpec:
 
 
 @dataclass(frozen=True)
+class MetricSpec:
+    label: str
+    calculator: Callable[["CountryReportData"], Decimal]
+
+
+@dataclass(frozen=True)
 class CountryConfig:
     code: str
     slug: str
@@ -67,9 +78,13 @@ class CountryConfig:
     title: str
     description: str
     sales_report_label: str
-    logic_pdf_label: str
+    logic_doc_label: str
+    logic_doc_accept: str
+    emblem_path: str
     excluded_transaction_types: tuple[str, ...]
     rules: tuple[RuleSpec, ...]
+    summary_metrics: tuple[MetricSpec, ...]
+    card_metrics: tuple[MetricSpec, ...]
 
 
 @dataclass(frozen=True)
@@ -101,6 +116,7 @@ class MatchedRow:
     transaction_currency_code: str
     price_of_items_vat_rate_percent: str
     buyer_vat_number: str
+    seller_arrival_country_vat_number: str
     sale_depart_country: str
     sale_arrival_country: str
     taxable_jurisdiction: str
@@ -108,28 +124,37 @@ class MatchedRow:
     invoice_url: str
 
 
+@dataclass
+class CountryReportData:
+    country: CountryConfig
+    matched_rows: list[MatchedRow]
+    group_totals: dict[str, Decimal]
+    total_sales: Decimal
+    sale_only_total: Decimal
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="根据国家税金逻辑，从 Amazon 销售报告中提取自行缴税订单并输出 Excel 汇总。"
+        description="根据国家税金逻辑，从 Amazon 销售报告中生成各国独立的税金汇总。"
     )
     parser.add_argument("csv_path", type=Path, help="季度销售报告 CSV 路径")
     parser.add_argument(
         "--country",
-        choices=("fr", "es"),
+        choices=("fr", "es", "uk", "de", "it"),
         default="fr",
-        help="国家代码。fr=法国，es=西班牙。",
+        help="国家代码：fr=法国，es=西班牙，uk=英国，de=德国，it=意大利。",
     )
     parser.add_argument(
         "--logic-pdf-path",
         type=Path,
         default=None,
-        help="税金逻辑 PDF 路径，仅用于在汇总页记录来源。",
+        help="税金逻辑源文件路径，仅用于在汇总页记录来源。",
     )
     parser.add_argument(
         "--output-path",
         type=Path,
         default=None,
-        help="输出 Excel 路径；默认在 CSV 同目录生成 *_自行缴税销售额汇总.xlsx。",
+        help="输出 Excel 路径；默认在 CSV 同目录生成 *_税金汇总.xlsx。",
     )
     return parser.parse_args()
 
@@ -165,18 +190,72 @@ def is_zero(raw: str) -> bool:
     return decimal_or_zero(raw) == 0
 
 
-def is_blank_or_zero(raw: str) -> bool:
-    value = raw.strip()
-    return value == "" or is_zero(value)
-
-
 def is_non_zero(raw: str) -> bool:
     value = raw.strip()
     return value != "" and not is_zero(value)
 
 
+def is_blank_or_zero(raw: str) -> bool:
+    value = raw.strip()
+    return value == "" or is_zero(value)
+
+
+def is_explicit_zero(raw: str) -> bool:
+    value = raw.strip()
+    return value != "" and is_zero(value)
+
+
+def vat_rate_equals(row: dict[str, str], value: str) -> bool:
+    return decimal_or_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT")) == decimal_or_zero(value)
+
+
 def is_seller_responsible(row: dict[str, str]) -> bool:
     return upper_value(row, "TAX_COLLECTION_RESPONSIBILITY") == "SELLER"
+
+
+def is_marketplace_responsible(row: dict[str, str]) -> bool:
+    return upper_value(row, "TAX_COLLECTION_RESPONSIBILITY") == "MARKETPLACE"
+
+
+def has_buyer_vat(row: dict[str, str]) -> bool:
+    return not is_blank(normalized(row, "BUYER_VAT_NUMBER"))
+
+
+def has_seller_arrival_vat(row: dict[str, str]) -> bool:
+    return not is_blank(normalized(row, "SELLER_ARRIVAL_COUNTRY_VAT_NUMBER"))
+
+
+def country_equals(row: dict[str, str], key: str, country_code: str) -> bool:
+    return upper_value(row, key) == country_code
+
+
+def country_in_eu(row: dict[str, str], key: str) -> bool:
+    return upper_value(row, key) in EU_COUNTRIES
+
+
+def rule_group_total(group_name: str, label: str | None = None) -> MetricSpec:
+    default_label = f"{group_name}(含税)" if group_name.endswith("销售额") else f"{group_name}销售额(含税)"
+    return MetricSpec(
+        label=label or default_label,
+        calculator=lambda report, target=group_name: report.group_totals.get(target, Decimal("0")),
+    )
+
+
+def derived_metric(label: str, calculator: Callable[[CountryReportData], Decimal]) -> MetricSpec:
+    return MetricSpec(label=label, calculator=calculator)
+
+
+def sum_metric(label: str, group_names: tuple[str, ...]) -> MetricSpec:
+    return MetricSpec(
+        label=label,
+        calculator=lambda report, groups=group_names: sum(
+            (report.group_totals.get(group, Decimal("0")) for group in groups),
+            start=Decimal("0"),
+        ),
+    )
+
+
+COUNTRY_CONFIGS: dict[str, CountryConfig] = {}
 
 
 def base_allowed(row: dict[str, str], ctx: RuleContext) -> bool:
@@ -189,9 +268,9 @@ def fr_rule_part_2(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and not is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") == "FR"
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") in EU_COUNTRIES
+        and has_buyer_vat(row)
+        and country_equals(row, "SALE_DEPART_COUNTRY", "FR")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
     )
 
 
@@ -200,9 +279,9 @@ def fr_rule_part_3_strict(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") in EU_COUNTRIES
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") == "FR"
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "FR")
     )
 
 
@@ -211,9 +290,9 @@ def fr_rule_part_3_missing(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_blank_or_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") in EU_COUNTRIES
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") == "FR"
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "FR")
     )
 
 
@@ -222,9 +301,9 @@ def es_rule_part_1(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and not is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") == "ES"
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") in EU_COUNTRIES
+        and has_buyer_vat(row)
+        and country_equals(row, "SALE_DEPART_COUNTRY", "ES")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
     )
 
 
@@ -233,9 +312,9 @@ def es_rule_part_2(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") in EU_COUNTRIES
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") == "ES"
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "ES")
     )
 
 
@@ -244,103 +323,379 @@ def es_rule_part_3(row: dict[str, str], ctx: RuleContext) -> bool:
         base_allowed(row, ctx)
         and is_seller_responsible(row)
         and is_blank(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
-        and is_blank(normalized(row, "BUYER_VAT_NUMBER"))
-        and upper_value(row, "SALE_DEPART_COUNTRY") in EU_COUNTRIES
-        and upper_value(row, "SALE_ARRIVAL_COUNTRY") == "ES"
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "ES")
     )
 
 
-COUNTRY_CONFIGS: dict[str, CountryConfig] = {
-    "fr": CountryConfig(
-        code="fr",
-        slug="france",
-        name_zh="法国",
-        title="法国季度申报税金计算",
-        description=(
-            "按法国税金逻辑提取自行缴税订单，固定包含第 2 部分、"
-            "第 3 部分严格口径，以及你确认过的第 3 部分遗漏订单口径。"
+def uk_rule_marketplace(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        is_marketplace_responsible(row)
+        and country_equals(row, "SALE_DEPART_COUNTRY", "GB")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
+    )
+
+
+def uk_rule_zero_rate(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        is_seller_responsible(row)
+        and country_equals(row, "SALE_DEPART_COUNTRY", "GB")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
+        and vat_rate_equals(row, "0")
+    )
+
+
+def uk_rule_taxed_part_a(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        is_seller_responsible(row)
+        and vat_rate_equals(row, "0.2")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "GB")
+    )
+
+
+def uk_rule_taxed_part_b(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        is_seller_responsible(row)
+        and vat_rate_equals(row, "0.2")
+        and country_equals(row, "SALE_DEPART_COUNTRY", "GB")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
+        and not has_seller_arrival_vat(row)
+    )
+
+
+def de_rule_depart_de_non_zero(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and country_equals(row, "SALE_DEPART_COUNTRY", "DE")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
+    )
+
+
+def de_rule_missing_domestic_zero(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_explicit_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and country_equals(row, "SALE_DEPART_COUNTRY", "DE")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "DE")
+    )
+
+
+def de_rule_missing_destination_de(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "DE")
+    )
+
+
+def it_rule_b1(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and has_buyer_vat(row)
+        and country_equals(row, "SALE_DEPART_COUNTRY", "IT")
+        and country_in_eu(row, "SALE_ARRIVAL_COUNTRY")
+    )
+
+
+def it_rule_b2(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_non_zero(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "IT")
+    )
+
+
+def it_rule_f(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        base_allowed(row, ctx)
+        and is_seller_responsible(row)
+        and is_blank(normalized(row, "PRICE_OF_ITEMS_VAT_RATE_PERCENT"))
+        and not has_buyer_vat(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "IT")
+    )
+
+
+COUNTRY_CONFIGS.update(
+    {
+        "fr": CountryConfig(
+            code="fr",
+            slug="france",
+            name_zh="法国",
+            title="法国季度申报税金计算",
+            description="按已确认的法国口径提取自行缴税订单，保留第 2 部分、第 3 部分严格口径与遗漏订单口径。",
+            sales_report_label="法国销售报告 CSV",
+            logic_doc_label="法国税金逻辑文件",
+            logic_doc_accept=".pdf,application/pdf",
+            emblem_path="/emblem_fr.svg",
+            excluded_transaction_types=("COMMINGLING BUY", "COMMINGLING SELLER"),
+            rules=(
+                RuleSpec(
+                    rule_id="FR_SELF_TAX_P2",
+                    logic_group="自行缴税第2部分",
+                    logic_bucket="规则2-1_FR出发_买家税号有效",
+                    description="CQ=SELLER；AE 非空且非 0；CA 有值；BP=FR；BQ 属于欧盟国家。",
+                    matcher=fr_rule_part_2,
+                ),
+                RuleSpec(
+                    rule_id="FR_SELF_TAX_P3_STRICT",
+                    logic_group="自行缴税第3部分",
+                    logic_bucket="规则2-2_目的国FR_买家税号空白_AE非零",
+                    description="CQ=SELLER；AE 非空且非 0；CA 空白；BP 属于欧盟国家；BQ=FR。",
+                    matcher=fr_rule_part_3_strict,
+                ),
+                RuleSpec(
+                    rule_id="FR_SELF_TAX_P3_MISSING",
+                    logic_group="自行缴税第3部分",
+                    logic_bucket="规则2-2_目的国FR_买家税号空白_AE空白或零_按遗漏订单纳入",
+                    description="CQ=SELLER；AE 为空白或为 0；CA 空白；BP 属于欧盟国家；BQ=FR。",
+                    matcher=fr_rule_part_3_missing,
+                ),
+            ),
+            summary_metrics=(
+                rule_group_total("自行缴税第2部分"),
+                rule_group_total("自行缴税第3部分"),
+                derived_metric("自行缴税合计销售额(含税)", lambda report: report.total_sales),
+                derived_metric("仅SALE交易销售额总额(含税)", lambda report: report.sale_only_total),
+            ),
+            card_metrics=(
+                rule_group_total("自行缴税第2部分", "自行缴税第2部分"),
+                rule_group_total("自行缴税第3部分", "自行缴税第3部分"),
+                derived_metric("自行缴税合计", lambda report: report.total_sales),
+            ),
         ),
-        sales_report_label="法国销售报告 CSV",
-        logic_pdf_label="法国税金逻辑 PDF",
-        excluded_transaction_types=("COMMINGLING BUY", "COMMINGLING SELLER"),
-        rules=(
-            RuleSpec(
-                rule_id="FR_SELF_TAX_P2",
-                logic_group="自行缴税第2部分",
-                logic_bucket="规则2-1_FR出发_买家税号有效",
-                description=(
-                    "F 不属于 COMMINGLING_BUY / COMMINGLING_SELLER；CQ=SELLER；"
-                    "AE 非空且非 0；CA 有值；BP=FR；BQ 属于欧盟国家。"
+        "es": CountryConfig(
+            code="es",
+            slug="spain",
+            name_zh="西班牙",
+            title="西班牙季度申报税金计算",
+            description="按西班牙计税原则提取自行缴税订单，独立计算第一部分、第二部分、第三部分。",
+            sales_report_label="西班牙销售报告 CSV",
+            logic_doc_label="西班牙税金逻辑文件",
+            logic_doc_accept=".pdf,application/pdf",
+            emblem_path="/emblem_es.svg",
+            excluded_transaction_types=("COMMINGLING BUY",),
+            rules=(
+                RuleSpec(
+                    rule_id="ES_SELF_TAX_P1",
+                    logic_group="自行缴税第一部分",
+                    logic_bucket="规则2-1_ES出发_买家税号有效",
+                    description="CQ=SELLER；AE 非空且非 0；CA 有值；BP=ES；BQ 属于欧盟国家。",
+                    matcher=es_rule_part_1,
                 ),
-                matcher=fr_rule_part_2,
+                RuleSpec(
+                    rule_id="ES_SELF_TAX_P2",
+                    logic_group="自行缴税第二部分",
+                    logic_bucket="规则2-2_目的国ES_买家税号空白_AE非零",
+                    description="CQ=SELLER；AE 非空且非 0；CA 空白；BP 属于欧盟国家；BQ=ES。",
+                    matcher=es_rule_part_2,
+                ),
+                RuleSpec(
+                    rule_id="ES_SELF_TAX_P3",
+                    logic_group="自行缴税第三部分",
+                    logic_bucket="规则2-3_目的国ES_买家税号空白_AE空白",
+                    description="CQ=SELLER；AE 为空白；CA 空白；BP 属于欧盟国家；BQ=ES。",
+                    matcher=es_rule_part_3,
+                ),
             ),
-            RuleSpec(
-                rule_id="FR_SELF_TAX_P3_STRICT",
-                logic_group="自行缴税第3部分",
-                logic_bucket="规则2-2_目的国FR_买家税号空白_AE非零",
-                description=(
-                    "F 不属于 COMMINGLING_BUY / COMMINGLING_SELLER；CQ=SELLER；"
-                    "AE 非空且非 0；CA 空白；BP 属于欧盟国家；BQ=FR。"
-                ),
-                matcher=fr_rule_part_3_strict,
+            summary_metrics=(
+                rule_group_total("自行缴税第一部分"),
+                rule_group_total("自行缴税第二部分"),
+                rule_group_total("自行缴税第三部分"),
+                derived_metric("自行缴税合计销售额(含税)", lambda report: report.total_sales),
+                derived_metric("仅SALE交易销售额总额(含税)", lambda report: report.sale_only_total),
             ),
-            RuleSpec(
-                rule_id="FR_SELF_TAX_P3_MISSING",
-                logic_group="自行缴税第3部分",
-                logic_bucket="规则2-2_目的国FR_买家税号空白_AE空白或零_按遗漏订单纳入",
-                description=(
-                    "固定补入遗漏订单口径：F 不属于 COMMINGLING_BUY / COMMINGLING_SELLER；"
-                    "CQ=SELLER；AE 为空白或为 0；CA 空白；BP 属于欧盟国家；BQ=FR。"
-                ),
-                matcher=fr_rule_part_3_missing,
-            ),
-        ),
-    ),
-    "es": CountryConfig(
-        code="es",
-        slug="spain",
-        name_zh="西班牙",
-        title="西班牙季度申报税金计算",
-        description=(
-            "按西班牙计税原则提取自行缴税订单，覆盖第一部分、第二部分、第三部分三段规则。"
-        ),
-        sales_report_label="西班牙销售报告 CSV",
-        logic_pdf_label="西班牙税金逻辑 PDF",
-        excluded_transaction_types=("COMMINGLING BUY",),
-        rules=(
-            RuleSpec(
-                rule_id="ES_SELF_TAX_P1",
-                logic_group="自行缴税第一部分",
-                logic_bucket="规则2-1_ES出发_买家税号有效",
-                description=(
-                    "F 不等于 COMMINGLING BUY；CQ=SELLER；AE 非空且非 0；"
-                    "CA 有值；BP=ES；BQ 属于欧盟国家。"
-                ),
-                matcher=es_rule_part_1,
-            ),
-            RuleSpec(
-                rule_id="ES_SELF_TAX_P2",
-                logic_group="自行缴税第二部分",
-                logic_bucket="规则2-2_目的国ES_买家税号空白_AE非零",
-                description=(
-                    "F 不等于 COMMINGLING BUY；CQ=SELLER；AE 非空且非 0；"
-                    "CA 空白；BP 属于欧盟国家；BQ=ES。"
-                ),
-                matcher=es_rule_part_2,
-            ),
-            RuleSpec(
-                rule_id="ES_SELF_TAX_P3",
-                logic_group="自行缴税第三部分",
-                logic_bucket="规则2-3_目的国ES_买家税号空白_AE空白",
-                description=(
-                    "F 不等于 COMMINGLING BUY；CQ=SELLER；AE 为空白；"
-                    "CA 空白；BP 属于欧盟国家；BQ=ES。"
-                ),
-                matcher=es_rule_part_3,
+            card_metrics=(
+                rule_group_total("自行缴税第一部分", "第一部分"),
+                rule_group_total("自行缴税第二部分", "第二部分"),
+                rule_group_total("自行缴税第三部分", "第三部分"),
+                derived_metric("自行缴税合计", lambda report: report.total_sales),
             ),
         ),
-    ),
-}
+        "uk": CountryConfig(
+            code="uk",
+            slug="uk",
+            name_zh="英国",
+            title="英国季度申报税金计算",
+            description="按英国税金计算逻辑独立汇总代扣销售额、未代扣 0 税率销售额、未代扣缴税 A/B 部分和应缴税金。",
+            sales_report_label="英国销售报告 CSV",
+            logic_doc_label="英国税金逻辑 TXT",
+            logic_doc_accept=".txt,text/plain",
+            emblem_path="/emblem_uk.svg",
+            excluded_transaction_types=(),
+            rules=(
+                RuleSpec(
+                    rule_id="UK_MARKETPLACE",
+                    logic_group="代扣代缴销售额",
+                    logic_bucket="CQ=MARKETPLACE_BP=GB_BQ保留欧盟国家",
+                    description="CQ=MARKETPLACE；BP=GB；BQ 保留欧盟国家代码；BA 求和。",
+                    matcher=uk_rule_marketplace,
+                ),
+                RuleSpec(
+                    rule_id="UK_ZERO_RATE",
+                    logic_group="未代扣0税率销售额",
+                    logic_bucket="CQ=SELLER_BP=GB_AE=0",
+                    description="CQ=SELLER；BP=GB；BQ 保留欧盟国家代码；AE=0；BA 求和。",
+                    matcher=uk_rule_zero_rate,
+                ),
+                RuleSpec(
+                    rule_id="UK_TAXABLE_A",
+                    logic_group="未代扣缴税A部分",
+                    logic_bucket="CQ=SELLER_AE=0.2_BQ=GB",
+                    description="CQ=SELLER；AE=0.2；BQ=GB；BA 求和。",
+                    matcher=uk_rule_taxed_part_a,
+                ),
+                RuleSpec(
+                    rule_id="UK_TAXABLE_B",
+                    logic_group="未代扣缴税B部分",
+                    logic_bucket="CQ=SELLER_AE=0.2_BP=GB_BQ剔除有税号国家及非欧盟国家",
+                    description="CQ=SELLER；AE=0.2；BP=GB；BQ 保留欧盟国家代码且卖家目的国税号为空；BA 求和。",
+                    matcher=uk_rule_taxed_part_b,
+                ),
+            ),
+            summary_metrics=(
+                rule_group_total("代扣代缴销售额"),
+                rule_group_total("未代扣0税率销售额"),
+                rule_group_total("未代扣缴税A部分"),
+                rule_group_total("未代扣缴税B部分"),
+                sum_metric("未代扣缴税销售额合计(含税)", ("未代扣缴税A部分", "未代扣缴税B部分")),
+                derived_metric(
+                    "应缴税金",
+                    lambda report: (
+                        report.group_totals.get("未代扣缴税A部分", Decimal("0"))
+                        + report.group_totals.get("未代扣缴税B部分", Decimal("0"))
+                    )
+                    / UK_TAX_DIVISOR
+                    * UK_TAX_RATE,
+                ),
+            ),
+            card_metrics=(
+                rule_group_total("代扣代缴销售额", "代扣销售额"),
+                rule_group_total("未代扣0税率销售额", "未代扣0税率"),
+                sum_metric("未代扣缴税合计", ("未代扣缴税A部分", "未代扣缴税B部分")),
+                derived_metric(
+                    "应缴税金",
+                    lambda report: (
+                        report.group_totals.get("未代扣缴税A部分", Decimal("0"))
+                        + report.group_totals.get("未代扣缴税B部分", Decimal("0"))
+                    )
+                    / UK_TAX_DIVISOR
+                    * UK_TAX_RATE,
+                ),
+            ),
+        ),
+        "de": CountryConfig(
+            code="de",
+            slug="germany",
+            name_zh="德国",
+            title="德国季度申报税金计算",
+            description="按德国文档中 Seller 相关口径独立汇总德国发欧盟销售额与两类平台遗漏订单，不额外推算税金。",
+            sales_report_label="德国销售报告 CSV",
+            logic_doc_label="德国税金逻辑 DOCX",
+            logic_doc_accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword",
+            emblem_path="/emblem_de.svg",
+            excluded_transaction_types=("COMMINGLING BUY",),
+            rules=(
+                RuleSpec(
+                    rule_id="DE_SELLER_NON_ZERO",
+                    logic_group="德国发出欧盟销售额",
+                    logic_bucket="CQ=SELLER_AE非零_BP=DE_BQ欧盟",
+                    description="CQ=SELLER；AE 非空且非 0；BP=DE；BQ 属于欧盟国家；BA 求和。",
+                    matcher=de_rule_depart_de_non_zero,
+                ),
+                RuleSpec(
+                    rule_id="DE_MISSING_DOMESTIC_ZERO",
+                    logic_group="平台遗漏订单(德国境内,AE=0)",
+                    logic_bucket="CQ=SELLER_AE=0_BP=DE_BQ=DE",
+                    description="CQ=SELLER；AE=0；BP=DE；BQ=DE；BA 求和。",
+                    matcher=de_rule_missing_domestic_zero,
+                ),
+                RuleSpec(
+                    rule_id="DE_MISSING_DESTINATION",
+                    logic_group="平台遗漏订单(目的国德国,AE非零)",
+                    logic_bucket="CQ=SELLER_AE非零_CA空白_BP欧盟_BQ=DE",
+                    description="CQ=SELLER；AE 非空且非 0；CA 空白；BP 属于欧盟国家；BQ=DE；BA 求和。",
+                    matcher=de_rule_missing_destination_de,
+                ),
+            ),
+            summary_metrics=(
+                rule_group_total("德国发出欧盟销售额"),
+                rule_group_total("平台遗漏订单(德国境内,AE=0)"),
+                rule_group_total("平台遗漏订单(目的国德国,AE非零)"),
+                derived_metric("Seller需申报销售额合计", lambda report: report.total_sales),
+            ),
+            card_metrics=(
+                rule_group_total("德国发出欧盟销售额", "德国发出欧盟"),
+                rule_group_total("平台遗漏订单(德国境内,AE=0)", "德国境内遗漏"),
+                rule_group_total("平台遗漏订单(目的国德国,AE非零)", "目的国德国遗漏"),
+                derived_metric("Seller需申报合计", lambda report: report.total_sales),
+            ),
+        ),
+        "it": CountryConfig(
+            code="it",
+            slug="italy",
+            name_zh="意大利",
+            title="意大利季度申报税金计算",
+            description="按意大利算税逻辑独立汇总 B1、B2、F 三段销售额，并计算净销售额与销项税。",
+            sales_report_label="意大利销售报告 CSV",
+            logic_doc_label="意大利税金逻辑 PDF",
+            logic_doc_accept=".pdf,application/pdf",
+            emblem_path="/emblem_it.svg",
+            excluded_transaction_types=("COMMINGLING BUY",),
+            rules=(
+                RuleSpec(
+                    rule_id="IT_B1",
+                    logic_group="B1销售额",
+                    logic_bucket="CQ=SELLER_AE非零_CA非空_BP=IT_BQ欧盟",
+                    description="CQ=SELLER；AE 非空且非 0；CA 非空；BP=IT；BQ 属于欧盟国家；BA 求和。",
+                    matcher=it_rule_b1,
+                ),
+                RuleSpec(
+                    rule_id="IT_B2",
+                    logic_group="B2销售额",
+                    logic_bucket="CQ=SELLER_AE非零_CA空白_BP欧盟_BQ=IT",
+                    description="CQ=SELLER；AE 非空且非 0；CA 空白；BP 属于欧盟国家；BQ=IT；BA 求和。",
+                    matcher=it_rule_b2,
+                ),
+                RuleSpec(
+                    rule_id="IT_F",
+                    logic_group="F销售额",
+                    logic_bucket="CQ=SELLER_AE空白_CA空白_BP欧盟_BQ=IT",
+                    description="CQ=SELLER；AE 为空白；CA 空白；BP 属于欧盟国家；BQ=IT；BA 求和。",
+                    matcher=it_rule_f,
+                ),
+            ),
+            summary_metrics=(
+                rule_group_total("B1销售额"),
+                rule_group_total("B2销售额"),
+                rule_group_total("F销售额"),
+                derived_metric("自行缴纳订单销售额合计(含税)", lambda report: report.total_sales),
+                derived_metric("自行缴纳订单净销售额", lambda report: report.total_sales / IT_TAX_DIVISOR),
+                derived_metric("销项税", lambda report: report.total_sales / IT_TAX_DIVISOR * IT_TAX_RATE),
+            ),
+            card_metrics=(
+                rule_group_total("B1销售额", "B1"),
+                rule_group_total("B2销售额", "B2"),
+                rule_group_total("F销售额", "F"),
+                derived_metric("自缴合计", lambda report: report.total_sales),
+                derived_metric("净销售额", lambda report: report.total_sales / IT_TAX_DIVISOR),
+                derived_metric("销项税", lambda report: report.total_sales / IT_TAX_DIVISOR * IT_TAX_RATE),
+            ),
+        ),
+    }
+)
 
 
 def get_country_config(country_code: str) -> CountryConfig:
@@ -350,15 +705,7 @@ def get_country_config(country_code: str) -> CountryConfig:
         raise ValueError(f"不支持的国家代码: {country_code}") from exc
 
 
-def get_group_order(country: CountryConfig) -> list[str]:
-    ordered: list[str] = []
-    for rule in country.rules:
-        if rule.logic_group not in ordered:
-            ordered.append(rule.logic_group)
-    return ordered
-
-
-def match_self_tax_logic(
+def match_country_rule(
     row: dict[str, str],
     ctx: RuleContext,
     country: CountryConfig,
@@ -380,7 +727,7 @@ def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         for source_row_number, row in enumerate(reader, start=2):
-            match = match_self_tax_logic(row, ctx, country)
+            match = match_country_rule(row, ctx, country)
             if not match:
                 continue
 
@@ -407,6 +754,9 @@ def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow
                     transaction_currency_code=row.get("TRANSACTION_CURRENCY_CODE", ""),
                     price_of_items_vat_rate_percent=row.get("PRICE_OF_ITEMS_VAT_RATE_PERCENT", ""),
                     buyer_vat_number=row.get("BUYER_VAT_NUMBER", ""),
+                    seller_arrival_country_vat_number=row.get(
+                        "SELLER_ARRIVAL_COUNTRY_VAT_NUMBER", ""
+                    ),
                     sale_depart_country=row.get("SALE_DEPART_COUNTRY", ""),
                     sale_arrival_country=row.get("SALE_ARRIVAL_COUNTRY", ""),
                     taxable_jurisdiction=row.get("TAXABLE_JURISDICTION", ""),
@@ -417,16 +767,6 @@ def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow
                 )
             )
     return matched_rows
-
-
-def autosize_worksheet(ws) -> None:
-    for column_cells in ws.columns:
-        max_length = 0
-        column_letter = get_column_letter(column_cells[0].column)
-        for cell in column_cells:
-            value = "" if cell.value is None else str(cell.value)
-            max_length = max(max_length, len(value))
-        ws.column_dimensions[column_letter].width = min(max_length + 2, 60)
 
 
 def summarize_by_group(matched_rows: list[MatchedRow]) -> dict[str, Decimal]:
@@ -457,20 +797,8 @@ def summarize_by_rule(
     return summary
 
 
-def build_summary_sheet(
-    wb: Workbook,
-    matched_rows: list[MatchedRow],
-    csv_path: Path,
-    logic_pdf_path: Path | None,
-    country: CountryConfig,
-) -> None:
-    ws = wb.active
-    ws.title = "汇总"
-
-    currency_codes = sorted(
-        {row.transaction_currency_code for row in matched_rows if row.transaction_currency_code}
-    )
-    totals_by_group = summarize_by_group(matched_rows)
+def build_report_data(country: CountryConfig, matched_rows: list[MatchedRow]) -> CountryReportData:
+    group_totals = summarize_by_group(matched_rows)
     total_sales = sum(
         (row.total_activity_value_amt_vat_incl for row in matched_rows),
         start=Decimal("0"),
@@ -483,29 +811,61 @@ def build_summary_sheet(
         ),
         start=Decimal("0"),
     )
-
-    summary_rows: list[tuple[str, object]] = [
-        ("国家", country.name_zh),
-        ("输入销售报告", str(csv_path)),
-        ("税金逻辑来源", str(logic_pdf_path) if logic_pdf_path else "未提供"),
-        ("命中自行缴税记录数", len(matched_rows)),
-    ]
-    for group in get_group_order(country):
-        summary_rows.append((f"{group}销售额(含税)", float(totals_by_group.get(group, Decimal("0")))))
-    summary_rows.extend(
-        [
-            ("自行缴税合计销售额(含税)", float(total_sales)),
-            ("仅SALE交易销售额总额(含税)", float(sale_only_total)),
-            ("币种", ", ".join(currency_codes) if currency_codes else ""),
-        ]
+    return CountryReportData(
+        country=country,
+        matched_rows=matched_rows,
+        group_totals=group_totals,
+        total_sales=total_sales,
+        sale_only_total=sale_only_total,
     )
 
+
+def evaluate_metrics(report: CountryReportData, specs: tuple[MetricSpec, ...]) -> list[tuple[str, Decimal]]:
+    return [(spec.label, spec.calculator(report)) for spec in specs]
+
+
+def extract_currency_codes(matched_rows: list[MatchedRow]) -> list[str]:
+    return sorted({row.transaction_currency_code for row in matched_rows if row.transaction_currency_code})
+
+
+def autosize_worksheet(ws) -> None:
+    for column_cells in ws.columns:
+        max_length = 0
+        column_letter = get_column_letter(column_cells[0].column)
+        for cell in column_cells:
+            value = "" if cell.value is None else str(cell.value)
+            max_length = max(max_length, len(value))
+        ws.column_dimensions[column_letter].width = min(max_length + 2, 60)
+
+
+def build_summary_sheet(
+    wb: Workbook,
+    report: CountryReportData,
+    csv_path: Path,
+    logic_doc_path: Path | None,
+) -> None:
+    ws = wb.active
+    ws.title = "汇总"
+
+    currency_codes = extract_currency_codes(report.matched_rows)
+
     ws.append(("指标", "值"))
-    for row in summary_rows:
+    base_rows: list[tuple[str, object]] = [
+        ("国家", report.country.name_zh),
+        ("输入销售报告", str(csv_path)),
+        ("税金逻辑来源", str(logic_doc_path) if logic_doc_path else "未提供"),
+        ("命中规则记录数", len(report.matched_rows)),
+    ]
+    for row in base_rows:
         ws.append(row)
 
+    for label, amount in evaluate_metrics(report, report.country.summary_metrics):
+        ws.append((label, float(amount)))
+
+    ws.append(("币种", ", ".join(currency_codes) if currency_codes else ""))
     ws["A1"].font = Font(bold=True)
     ws["B1"].font = Font(bold=True)
+
     for row_index in range(2, ws.max_row + 1):
         if isinstance(ws.cell(row=row_index, column=2).value, (int, float)):
             ws.cell(row=row_index, column=2).number_format = "0.00"
@@ -575,6 +935,7 @@ def build_detail_sheet(wb: Workbook, matched_rows: list[MatchedRow]) -> None:
         "transaction_currency_code",
         "price_of_items_vat_rate_percent",
         "buyer_vat_number",
+        "seller_arrival_country_vat_number",
         "sale_depart_country",
         "sale_arrival_country",
         "taxable_jurisdiction",
@@ -607,6 +968,7 @@ def build_detail_sheet(wb: Workbook, matched_rows: list[MatchedRow]) -> None:
                 row.transaction_currency_code,
                 row.price_of_items_vat_rate_percent,
                 row.buyer_vat_number,
+                row.seller_arrival_country_vat_number,
                 row.sale_depart_country,
                 row.sale_arrival_country,
                 row.taxable_jurisdiction,
@@ -624,15 +986,14 @@ def build_detail_sheet(wb: Workbook, matched_rows: list[MatchedRow]) -> None:
 
 
 def build_workbook(
-    matched_rows: list[MatchedRow],
+    report: CountryReportData,
     csv_path: Path,
-    logic_pdf_path: Path | None,
-    country: CountryConfig,
+    logic_doc_path: Path | None,
 ) -> Workbook:
     wb = Workbook()
-    build_summary_sheet(wb, matched_rows, csv_path, logic_pdf_path, country)
-    build_rule_sheet(wb, matched_rows, country)
-    build_detail_sheet(wb, matched_rows)
+    build_summary_sheet(wb, report, csv_path, logic_doc_path)
+    build_rule_sheet(wb, report.matched_rows, report.country)
+    build_detail_sheet(wb, report.matched_rows)
     return wb
 
 
@@ -644,24 +1005,23 @@ def generate_self_tax_report(
 ) -> dict[str, object]:
     country = get_country_config(country_code)
     csv_path = csv_path.expanduser().resolve()
-    logic_pdf_path = logic_pdf_path.expanduser().resolve() if logic_pdf_path else None
+    logic_doc_path = logic_pdf_path.expanduser().resolve() if logic_pdf_path else None
 
     if not csv_path.exists():
         raise FileNotFoundError(f"未找到销售报告: {csv_path}")
 
     if output_path is None:
-        output_path = csv_path.with_name(f"{csv_path.stem}_自行缴税销售额汇总.xlsx")
+        output_path = csv_path.with_name(f"{csv_path.stem}_{country.name_zh}税金汇总.xlsx")
     output_path = output_path.expanduser().resolve()
 
     matched_rows = iter_matched_rows(csv_path, country)
-    workbook = build_workbook(matched_rows, csv_path, logic_pdf_path, country)
+    report = build_report_data(country, matched_rows)
+    workbook = build_workbook(report, csv_path, logic_doc_path)
     workbook.save(output_path)
 
-    totals_by_group = summarize_by_group(matched_rows)
-    total_sales = sum(
-        (row.total_activity_value_amt_vat_incl for row in matched_rows),
-        start=Decimal("0"),
-    )
+    summary_metrics = evaluate_metrics(report, country.summary_metrics)
+    card_metrics = evaluate_metrics(report, country.card_metrics)
+    currency_codes = extract_currency_codes(report.matched_rows)
 
     return {
         "country_code": country.code,
@@ -670,9 +1030,11 @@ def generate_self_tax_report(
         "output_path": output_path,
         "matched_rows": matched_rows,
         "row_count": len(matched_rows),
-        "group_order": get_group_order(country),
-        "group_totals": {key: totals_by_group.get(key, Decimal("0")) for key in get_group_order(country)},
-        "total_sales": total_sales,
+        "group_totals": report.group_totals,
+        "summary_metrics": summary_metrics,
+        "card_metrics": card_metrics,
+        "currency_codes": currency_codes,
+        "total_sales": report.total_sales,
     }
 
 
@@ -687,10 +1049,9 @@ def main() -> None:
 
     print(f"国家: {result['country_name']}")
     print(f"输出文件: {result['output_path']}")
-    print(f"命中自行缴税记录数: {result['row_count']}")
-    for group in result["group_order"]:
-        print(f"{group}销售额(含税): {result['group_totals'][group]:.2f}")
-    print(f"自行缴税订单销售额总额(含税): {result['total_sales']:.2f}")
+    print(f"命中规则记录数: {result['row_count']}")
+    for label, amount in result["summary_metrics"]:
+        print(f"{label}: {amount:.2f}")
 
 
 if __name__ == "__main__":

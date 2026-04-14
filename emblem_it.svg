@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>意大利国徽</title>
+  <circle cx="64" cy="64" r="60" fill="#fdf9ef" stroke="#c79d41" stroke-width="4"/>
+  <path d="M64 18 92 28v30c0 22-11 38-28 52C47 96 36 80 36 58V28z" fill="#fff" stroke="#b38728" stroke-width="3"/>
+  <path d="M36 28h18v60c-9-8-15-18-18-30z" fill="#1f8b4c"/>
+  <path d="M74 28h18v30c0 12-3 22-9 30-3-3-6-6-9-10z" fill="#d14343"/>
+  <circle cx="64" cy="58" r="12" fill="none" stroke="#c79d41" stroke-width="4"/>
+  <path d="m64 40 4 8 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z" fill="#d4a73a"/>
+  <path d="M25 80c8 18 21 28 39 33M103 80c-8 18-21 28-39 33" fill="none" stroke="#7b8f4e" stroke-linecap="round" stroke-width="4"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>德国国徽</title>
+  <circle cx="64" cy="64" r="60" fill="#faf3df" stroke="#c79d41" stroke-width="4"/>
+  <path d="M64 18 92 28v30c0 22-11 38-28 52C47 96 36 80 36 58V28z" fill="#fff" stroke="#b38728" stroke-width="3"/>
+  <path d="M36 28h56v18H36z" fill="#1d1d1b"/>
+  <path d="M36 46h56v18H36z" fill="#b21f2d"/>
+  <path d="M36 64h56v24H36z" fill="#e5ad20"/>
+  <path d="M64 42 70 54l10 6-8 6 4 12-12-7-12 7 4-12-8-6 10-6z" fill="#1d1d1b" opacity=".72"/>
+  <path d="M25 80c8 18 21 28 39 33M103 80c-8 18-21 28-39 33" fill="none" stroke="#7b8f4e" stroke-linecap="round" stroke-width="4"/>
+</svg>

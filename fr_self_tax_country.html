@@ -6,47 +6,70 @@
   <title>__COUNTRY_TITLE__</title>
   <style>
     :root {
-      --bg: #f4efe6;
+      --bg: #f5efe4;
       --paper: #fffaf2;
       --ink: #1f2937;
       --muted: #6b7280;
       --line: #d9ccb8;
-      --accent: #0f766e;
-      --accent-2: #b45309;
-      --shadow: 0 24px 60px rgba(72, 54, 29, 0.12);
+      --navy: #1f3a5f;
+      --teal: #0f766e;
+      --amber: #b45309;
+      --shadow: 0 24px 60px rgba(72, 54, 29, 0.14);
     }
 
     * { box-sizing: border-box; }
 
     body {
       margin: 0;
+      min-height: 100vh;
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       color: var(--ink);
       background:
         radial-gradient(circle at top left, rgba(180, 83, 9, 0.12), transparent 30%),
         radial-gradient(circle at right 20%, rgba(15, 118, 110, 0.12), transparent 28%),
-        linear-gradient(180deg, #f8f3ea 0%, var(--bg) 100%);
-      min-height: 100vh;
-      padding: 28px 16px 48px;
+        linear-gradient(180deg, #faf5ec 0%, var(--bg) 100%);
+      padding: 28px 16px 52px;
     }
 
     .wrap {
-      max-width: 980px;
+      max-width: 1060px;
       margin: 0 auto;
     }
 
     .hero {
-      background: linear-gradient(135deg, rgba(15, 118, 110, 0.92), rgba(180, 83, 9, 0.88));
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 22px;
+      align-items: center;
+      background: linear-gradient(135deg, rgba(24, 49, 83, 0.96), rgba(15, 118, 110, 0.9) 60%, rgba(180, 83, 9, 0.88));
       color: #fffdf8;
-      border-radius: 28px;
+      border-radius: 30px;
       padding: 28px;
       box-shadow: var(--shadow);
+    }
+
+    .crest-panel {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 140px;
+      border-radius: 24px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(8px);
+    }
+
+    .crest {
+      width: 96px;
+      height: 96px;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 18px rgba(0,0,0,0.18));
     }
 
     .back {
       display: inline-block;
       margin-bottom: 12px;
-      color: rgba(255, 253, 248, 0.84);
+      color: rgba(255, 253, 248, 0.82);
       text-decoration: none;
       font-size: 14px;
     }
@@ -55,24 +78,22 @@
       margin: 0 0 10px;
       font-size: clamp(28px, 4vw, 44px);
       line-height: 1.08;
-      letter-spacing: 0.01em;
     }
 
     .hero p {
       margin: 0;
+      line-height: 1.76;
       max-width: 760px;
-      line-height: 1.7;
       opacity: 0.95;
     }
 
-    .panel {
+    .panel, .result {
       margin-top: 22px;
-      background: rgba(255, 250, 242, 0.95);
-      border: 1px solid rgba(217, 204, 184, 0.9);
+      background: rgba(255, 250, 242, 0.96);
+      border: 1px solid rgba(217, 204, 184, 0.92);
       border-radius: 24px;
       padding: 24px;
       box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
     }
 
     .grid {
@@ -100,6 +121,7 @@
       margin-bottom: 10px;
       font-weight: 700;
       font-size: 18px;
+      color: var(--navy);
     }
 
     input[type="file"] {
@@ -126,7 +148,7 @@
       font-weight: 700;
       cursor: pointer;
       color: #fff;
-      background: linear-gradient(135deg, var(--accent), #155e75);
+      background: linear-gradient(135deg, var(--teal), #155e75);
       box-shadow: 0 12px 28px rgba(15, 118, 110, 0.24);
     }
 
@@ -136,26 +158,22 @@
     }
 
     .result {
-      margin-top: 22px;
-      border-radius: 24px;
-      padding: 24px;
-      background: #fffefb;
-      border: 1px solid var(--line);
       display: none;
+      background: #fffefb;
     }
 
     .result.show { display: block; }
 
-    .error {
-      border-color: #e7b0a9;
-      background: #fff6f4;
+    .result.error {
+      border-color: #e8b3ab;
+      background: #fff7f5;
     }
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
-      margin: 18px 0;
+      margin: 18px 0 14px;
     }
 
     .card {
@@ -167,38 +185,49 @@
 
     .card span {
       display: block;
+      margin-bottom: 8px;
       color: var(--muted);
       font-size: 13px;
-      margin-bottom: 8px;
+      line-height: 1.5;
     }
 
     .card strong {
       font-size: 26px;
       line-height: 1.1;
-      color: var(--accent-2);
+      color: var(--amber);
     }
 
     .download {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-top: 6px;
+      margin-top: 8px;
       border-radius: 999px;
       padding: 12px 18px;
       color: #fff;
       text-decoration: none;
       font-weight: 700;
-      background: linear-gradient(135deg, var(--accent-2), #92400e);
+      background: linear-gradient(135deg, var(--amber), #92400e);
     }
 
     .list {
       margin: 10px 0 0;
       padding-left: 18px;
-      line-height: 1.7;
+      line-height: 1.8;
+    }
+
+    .summary-title {
+      margin: 18px 0 6px;
+      color: var(--navy);
+      font-size: 18px;
     }
 
     @media (max-width: 760px) {
-      .grid, .stats {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .grid {
         grid-template-columns: 1fr;
       }
 
@@ -209,12 +238,17 @@
     }
   </style>
 </head>
-<body data-country="__COUNTRY_CODE__">
+<body data-country="__COUNTRY_NAME__" data-country-code="__COUNTRY_CODE__" data-country-slug="__COUNTRY_SLUG__">
   <div class="wrap">
     <section class="hero">
-      <a class="back" href="/">返回国家入口</a>
-      <h1>__COUNTRY_TITLE__</h1>
-      <p>__COUNTRY_DESCRIPTION__</p>
+      <div class="crest-panel">
+        <img class="crest" src="__COUNTRY_EMBLEM_SRC__" alt="__COUNTRY_EMBLEM_ALT__">
+      </div>
+      <div>
+        <a class="back" href="/">返回国家入口</a>
+        <h1>__COUNTRY_TITLE__</h1>
+        <p>__COUNTRY_DESCRIPTION__</p>
+      </div>
     </section>
 
     <section class="panel">
@@ -228,14 +262,14 @@
 
           <label class="field">
             <span class="label">文件入口 2</span>
-            <span class="title">__LOGIC_PDF_LABEL__</span>
-            <input type="file" name="logic_pdf" accept=".pdf,application/pdf" required>
+            <span class="title">__LOGIC_DOC_LABEL__</span>
+            <input type="file" name="logic_pdf" accept="__LOGIC_ACCEPT__" required>
           </label>
         </div>
 
         <div class="actions">
           <button type="submit">生成申报 Excel</button>
-          <span class="hint">默认生成新的结果文件，不覆盖原始 CSV/PDF。</span>
+          <span class="hint">默认生成新的结果文件，不覆盖原始销售报告和逻辑文件。</span>
         </div>
       </form>
     </section>
@@ -243,35 +277,56 @@
     <section id="result" class="result">
       <h2 id="result-title">处理结果</h2>
       <p id="result-message"></p>
+      <p id="row-count"></p>
 
       <div id="stats" class="stats"></div>
 
-      <p id="row-count"></p>
       <a id="download-link" class="download" href="#" hidden>下载结果 Excel</a>
 
+      <h3 class="summary-title">汇总指标</h3>
+      <ul id="summary-metrics" class="list"></ul>
+
+      <h3 class="summary-title">处理说明</h3>
       <ul id="notes" class="list"></ul>
     </section>
   </div>
 
   <script>
-    const country = document.body.dataset.country;
+    const countrySlug = document.body.dataset.countrySlug;
     const form = document.getElementById('upload-form');
     const result = document.getElementById('result');
     const resultTitle = document.getElementById('result-title');
     const resultMessage = document.getElementById('result-message');
-    const stats = document.getElementById('stats');
     const rowCount = document.getElementById('row-count');
-    const notes = document.getElementById('notes');
+    const stats = document.getElementById('stats');
     const downloadLink = document.getElementById('download-link');
+    const summaryMetrics = document.getElementById('summary-metrics');
+    const notes = document.getElementById('notes');
 
-    function renderStats(groupTotals) {
+    function renderCards(items, currencyLabel) {
       stats.innerHTML = '';
-      if (!Array.isArray(groupTotals)) return;
-      groupTotals.forEach((item) => {
+      if (!Array.isArray(items)) return;
+      items.forEach((item) => {
         const card = document.createElement('div');
         card.className = 'card';
-        card.innerHTML = `<span>${item.label}</span><strong>${item.amount} EUR</strong>`;
+        const suffix = currencyLabel ? ` ${currencyLabel}` : '';
+        card.innerHTML = `<span>${item.label}</span><strong>${item.amount}${suffix}</strong>`;
         stats.appendChild(card);
+      });
+    }
+
+    function renderList(target, items, currencyLabel) {
+      target.innerHTML = '';
+      if (!Array.isArray(items)) return;
+      items.forEach((item) => {
+        const li = document.createElement('li');
+        if (typeof item === 'string') {
+          li.textContent = item;
+        } else {
+          const suffix = currencyLabel ? ` ${currencyLabel}` : '';
+          li.textContent = `${item.label}：${item.amount}${suffix}`;
+        }
+        target.appendChild(li);
       });
     }
 
@@ -281,16 +336,10 @@
       resultTitle.textContent = isError ? '处理失败' : '处理完成';
       resultMessage.textContent = data.message || '';
       rowCount.textContent = isError ? '' : `命中记录数：${data.row_count} 笔`;
-      notes.innerHTML = '';
-      renderStats(isError ? [] : data.group_totals);
-
-      if (!isError && Array.isArray(data.notes)) {
-        data.notes.forEach((item) => {
-          const li = document.createElement('li');
-          li.textContent = item;
-          notes.appendChild(li);
-        });
-      }
+      const currencyLabel = isError ? '' : (data.currency_label || '');
+      renderCards(isError ? [] : data.card_metrics, currencyLabel);
+      renderList(summaryMetrics, isError ? [] : data.summary_metrics, currencyLabel);
+      renderList(notes, data.notes || []);
 
       if (!isError && data.download_url) {
         downloadLink.hidden = false;
@@ -309,12 +358,13 @@
       resultTitle.textContent = '处理中';
       resultMessage.textContent = '正在读取文件并计算，请稍候...';
       rowCount.textContent = '';
-      notes.innerHTML = '';
       stats.innerHTML = '';
+      summaryMetrics.innerHTML = '';
+      notes.innerHTML = '';
       downloadLink.hidden = true;
 
       try {
-        const response = await fetch(`/process/${country}`, {
+        const response = await fetch(`/process/${countrySlug}`, {
           method: 'POST',
           body: formData
         });

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>英国国徽</title>
+  <circle cx="64" cy="64" r="60" fill="#f4f7fb" stroke="#c79d41" stroke-width="4"/>
+  <path d="M64 18 92 28v30c0 22-11 38-28 52C47 96 36 80 36 58V28z" fill="#1c3564" stroke="#b38728" stroke-width="3"/>
+  <path d="M36 38 92 78M92 38 36 78" stroke="#fff" stroke-width="10"/>
+  <path d="M64 28v62M36 59h56" stroke="#fff" stroke-width="16"/>
+  <path d="M36 42 88 79M90 42 40 79" stroke="#cf2435" stroke-width="5"/>
+  <path d="M64 28v62M36 59h56" stroke="#cf2435" stroke-width="8"/>
+  <path d="M25 80c8 18 21 28 39 33M103 80c-8 18-21 28-39 33" fill="none" stroke="#7b8f4e" stroke-linecap="round" stroke-width="4"/>
+</svg>

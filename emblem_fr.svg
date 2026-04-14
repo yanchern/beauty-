@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>法国国徽</title>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fef9ef"/>
+      <stop offset="1" stop-color="#f2e2bc"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg)" stroke="#c79d41" stroke-width="4"/>
+  <path d="M64 18 92 28v30c0 22-11 38-28 52C47 96 36 80 36 58V28z" fill="#fff" stroke="#b38728" stroke-width="3"/>
+  <path d="M36 28h19v63c-7-6-12-14-16-24-2-5-3-10-3-17z" fill="#1f4ea8"/>
+  <path d="M73 28h19v30c0 7-1 12-3 17-4 10-9 18-16 24z" fill="#d63031"/>
+  <path d="m64 39 5 10 11 2-8 8 2 11-10-5-10 5 2-11-8-8 11-2z" fill="#d4a73a"/>
+  <path d="M25 80c8 18 21 28 39 33M103 80c-8 18-21 28-39 33" fill="none" stroke="#7b8f4e" stroke-linecap="round" stroke-width="4"/>
+</svg>
