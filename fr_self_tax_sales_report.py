@@ -140,9 +140,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("csv_path", type=Path, help="季度销售报告 CSV 路径")
     parser.add_argument(
         "--country",
-        choices=("fr", "es", "uk", "de", "it"),
+        choices=("fr", "es", "uk", "de", "it", "nl"),
         default="fr",
-        help="国家代码：fr=法国，es=西班牙，uk=英国，de=德国，it=意大利。",
+        help="国家代码：fr=法国，es=西班牙，uk=英国，de=德国，it=意大利，nl=荷兰。",
     )
     parser.add_argument(
         "--logic-pdf-path",
@@ -428,6 +428,14 @@ def it_rule_f(row: dict[str, str], ctx: RuleContext) -> bool:
     )
 
 
+def nl_rule_marketplace(row: dict[str, str], ctx: RuleContext) -> bool:
+    return (
+        is_marketplace_responsible(row)
+        and country_in_eu(row, "SALE_DEPART_COUNTRY")
+        and country_equals(row, "SALE_ARRIVAL_COUNTRY", "NL")
+    )
+
+
 COUNTRY_CONFIGS.update(
     {
         "fr": CountryConfig(
@@ -692,6 +700,35 @@ COUNTRY_CONFIGS.update(
                 derived_metric("自缴合计", lambda report: report.total_sales),
                 derived_metric("净销售额", lambda report: report.total_sales / IT_TAX_DIVISOR),
                 derived_metric("销项税", lambda report: report.total_sales / IT_TAX_DIVISOR * IT_TAX_RATE),
+            ),
+        ),
+        "nl": CountryConfig(
+            code="nl",
+            slug="netherlands",
+            name_zh="荷兰",
+            title="荷兰季度申报税金计算",
+            description="按荷兰文档原文只汇总代扣代缴销售额：CQ=MARKETPLACE，BP 发出国保留欧盟国家，BQ=NL。",
+            sales_report_label="荷兰销售报告 CSV",
+            logic_doc_label="荷兰税金逻辑 DOCX",
+            logic_doc_accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword",
+            emblem_path="/emblem_nl.svg",
+            excluded_transaction_types=(),
+            rules=(
+                RuleSpec(
+                    rule_id="NL_MARKETPLACE",
+                    logic_group="代扣代缴销售额",
+                    logic_bucket="CQ=MARKETPLACE_BP欧盟_BQ=NL",
+                    description="CQ=MARKETPLACE；BP 发出国排除非欧盟国家；BQ 到达国家=NL；BA 求和。",
+                    matcher=nl_rule_marketplace,
+                ),
+            ),
+            summary_metrics=(
+                rule_group_total("代扣代缴销售额"),
+                derived_metric("代扣代缴销售额合计(含税)", lambda report: report.total_sales),
+            ),
+            card_metrics=(
+                rule_group_total("代扣代缴销售额", "代扣代缴销售额"),
+                derived_metric("代扣合计", lambda report: report.total_sales),
             ),
         ),
     }

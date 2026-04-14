@@ -197,6 +197,43 @@ class TaxLogicTests(unittest.TestCase):
             self.assertEqual("400.00", metrics["自行缴纳订单净销售额"])
             self.assertEqual("88.00", metrics["销项税"])
 
+    def test_netherlands_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            csv_path = self.write_csv(
+                [
+                    self.base_row(
+                        TAX_COLLECTION_RESPONSIBILITY="MARKETPLACE",
+                        SALE_DEPART_COUNTRY="DE",
+                        SALE_ARRIVAL_COUNTRY="NL",
+                        TOTAL_ACTIVITY_VALUE_AMT_VAT_INCL="180",
+                        TRANSACTION_EVENT_ID="nl-main",
+                    ),
+                    self.base_row(
+                        TAX_COLLECTION_RESPONSIBILITY="MARKETPLACE",
+                        SALE_DEPART_COUNTRY="GB",
+                        SALE_ARRIVAL_COUNTRY="NL",
+                        TOTAL_ACTIVITY_VALUE_AMT_VAT_INCL="999",
+                        TRANSACTION_EVENT_ID="nl-excluded-non-eu",
+                    ),
+                    self.base_row(
+                        TAX_COLLECTION_RESPONSIBILITY="SELLER",
+                        SALE_DEPART_COUNTRY="FR",
+                        SALE_ARRIVAL_COUNTRY="NL",
+                        TOTAL_ACTIVITY_VALUE_AMT_VAT_INCL="999",
+                        TRANSACTION_EVENT_ID="nl-excluded-seller",
+                    ),
+                ],
+                tmpdir,
+                "nl.csv",
+            )
+            result = generate_self_tax_report(csv_path=csv_path, country_code="nl")
+            metrics = metric_dict(result, "summary_metrics")
+
+            self.assertEqual("180.00", metrics["代扣代缴销售额(含税)"])
+            self.assertEqual("180.00", metrics["代扣代缴销售额合计(含税)"])
+            self.assertEqual(1, result["row_count"])
+
     def test_render_templates_and_routes(self) -> None:
         home = render_home()
         self.assertIn("/france", home)
@@ -204,22 +241,26 @@ class TaxLogicTests(unittest.TestCase):
         self.assertIn("/uk", home)
         self.assertIn("/germany", home)
         self.assertIn("/italy", home)
+        self.assertIn("/netherlands", home)
         self.assertIn("/emblem_uk.svg", home)
+        self.assertIn("/emblem_nl.svg", home)
 
         uk_page = render_country_page("uk")
         de_page = render_country_page("germany")
         it_page = render_country_page("italy")
+        nl_page = render_country_page("netherlands")
         self.assertIn("英国税金逻辑 TXT", uk_page)
         self.assertIn(".txt,text/plain", uk_page)
         self.assertIn(".docx,.doc", de_page)
         self.assertIn("意大利税金逻辑 PDF", it_page)
+        self.assertIn("荷兰税金逻辑 DOCX", nl_page)
 
         server = make_server("127.0.0.1", 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             base_url = f"http://127.0.0.1:{server.server_port}"
-            for path in ("/healthz", "/france", "/spain", "/uk", "/germany", "/italy"):
+            for path in ("/healthz", "/france", "/spain", "/uk", "/germany", "/italy", "/netherlands"):
                 with urllib.request.urlopen(f"{base_url}{path}") as response:
                     self.assertEqual(200, response.status)
         finally:

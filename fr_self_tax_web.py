@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "tax_web_data"
 HOME_TEMPLATE_PATH = BASE_DIR / "fr_self_tax_web.html"
 COUNTRY_TEMPLATE_PATH = BASE_DIR / "fr_self_tax_country.html"
-COUNTRY_ORDER = ("fr", "es", "uk", "de", "it")
+COUNTRY_ORDER = ("fr", "es", "uk", "de", "it", "nl")
 ALLOWED_EMBLEMS = {Path(COUNTRY_CONFIGS[code].emblem_path).name for code in COUNTRY_ORDER}
 COUNTRY_BY_SLUG = {COUNTRY_CONFIGS[code].slug: COUNTRY_CONFIGS[code] for code in COUNTRY_ORDER}
 
