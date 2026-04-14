@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>欧洲季度申报税金入口</title>
+  <style>
+    :root {
+      --bg: #efe9df;
+      --paper: #fffaf2;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #d7cab8;
+      --teal: #0f766e;
+      --amber: #b45309;
+      --navy: #1d3557;
+      --shadow: 0 26px 64px rgba(62, 47, 24, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 28%),
+        radial-gradient(circle at right 15%, rgba(180, 83, 9, 0.14), transparent 26%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--bg) 100%);
+      padding: 28px 16px 48px;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      border-radius: 30px;
+      padding: 32px;
+      color: #fffdf9;
+      background: linear-gradient(135deg, var(--navy), var(--teal) 58%, var(--amber));
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: clamp(30px, 4vw, 50px);
+      line-height: 1.05;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 760px;
+      line-height: 1.8;
+      opacity: 0.96;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+      margin-top: 26px;
+    }
+
+    .card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      border-radius: 28px;
+      padding: 24px;
+      background: rgba(255, 250, 242, 0.96);
+      border: 1px solid rgba(215, 202, 184, 0.95);
+      box-shadow: var(--shadow);
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 30px 70px rgba(62, 47, 24, 0.18);
+      border-color: rgba(15, 118, 110, 0.35);
+    }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: #fff;
+      background: linear-gradient(135deg, var(--teal), var(--amber));
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      color: var(--navy);
+    }
+
+    .card p {
+      margin: 0;
+      line-height: 1.8;
+      color: var(--muted);
+    }
+
+    .meta {
+      margin-top: 18px;
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      .hero, .card { border-radius: 22px; padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>欧洲季度申报税金入口</h1>
+      <p>按国家分别上传销售报告和计税原则，系统会使用对应国家的固定规则生成 Excel 汇总。当前已支持法国和西班牙两个入口。</p>
+    </section>
+
+    <section class="grid">
+      <a class="card" href="/france">
+        <span class="eyebrow">FRANCE</span>
+        <h2>法国</h2>
+        <p>使用已固定的法国税金逻辑，包含第 2 部分、第 3 部分严格口径，以及已确认的亚马逊遗漏订单口径。</p>
+        <div class="meta">进入法国计算入口</div>
+      </a>
+
+      <a class="card" href="/spain">
+        <span class="eyebrow">SPAIN</span>
+        <h2>西班牙</h2>
+        <p>使用西班牙计税原则，覆盖自行缴税第一部分、第二部分、第三部分三段规则，并输出对应明细。</p>
+        <div class="meta">进入西班牙计算入口</div>
+      </a>
+    </section>
+  </div>
+</body>
+</html>

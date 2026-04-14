@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+*.log
+
+fr_self_tax_web_data/
+tax_web_data/
+
+*.csv
+*.xlsx
+*.pdf
+*.png
+*.html.bak
+
+~$*.xlsx

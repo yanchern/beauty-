@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: eu-quarterly-tax-web
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python fr_self_tax_web.py
+    healthCheckPath: /healthz
+    autoDeploy: false
