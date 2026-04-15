@@ -257,27 +257,14 @@ class TaxLogicTests(unittest.TestCase):
                 tmpdir,
                 "sa_sales.csv",
             )
-            expense_path = self.write_csv(
-                [
-                    {"Type": "Subtotal", "Price": "10"},
-                    {"Type": "Total", "Price": "40"},
-                ],
-                tmpdir,
-                "sa_expense.csv",
-            )
             result = generate_self_tax_report(
                 csv_path=sales_path,
                 country_code="sa",
-                logic_pdf_path=expense_path,
             )
             metrics = metric_dict(result, "summary_metrics")
 
-            self.assertEqual("115.00", metrics["SALES GROSS"])
-            self.assertEqual("100.00", metrics["SALES NET"])
-            self.assertEqual("40.00", metrics["EXPENSE"])
-            self.assertEqual("6.00", metrics["INPUT VAT"])
-            self.assertEqual("15.00", metrics["OUT VAT"])
-            self.assertEqual("9.00", metrics["VAT DUE"])
+            self.assertEqual("115.00", metrics["季度应纳税销售额(含税)"])
+            self.assertEqual("100.00", metrics["季度不含税销售额"])
             self.assertEqual(1, result["row_count"])
 
     def test_render_templates_and_routes(self) -> None:
@@ -303,8 +290,8 @@ class TaxLogicTests(unittest.TestCase):
         self.assertIn(".docx,.doc", de_page)
         self.assertIn("意大利税金逻辑 PDF", it_page)
         self.assertIn("荷兰税金逻辑 DOCX", nl_page)
-        self.assertIn("沙特FBA发票或费用文件", sa_page)
-        self.assertIn(".csv,.xlsx", sa_page)
+        self.assertIn("沙特税金计算方法", sa_page)
+        self.assertIn(".xlsx,.xls", sa_page)
 
         server = make_server("127.0.0.1", 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

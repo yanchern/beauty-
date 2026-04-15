@@ -865,11 +865,11 @@ COUNTRY_CONFIGS.update(
             slug="saudi",
             name_zh="沙特",
             title="沙特季度申报税金计算",
-            description="按沙特方法计算 SALES GROSS、SALES NET、EXPENSE、INPUT VAT、OUT VAT 和 VAT DUE。销售文件需包含 fulfillment-channel、product sales、shipping credits、promotional rebates；费用文件需能识别 Price 和 Total。",
+            description="按沙特税金计算方法汇总季度应纳税销售额。销售文件需包含 fulfillment-channel、product sales、shipping credits、promotional rebates；结果输出 SALES GROSS（含税）和 SALES NET（不含税）。",
             sales_report_label="沙特销售数据文件",
             sales_report_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            logic_doc_label="沙特FBA发票或费用文件",
-            logic_doc_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            logic_doc_label="沙特税金计算方法",
+            logic_doc_accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
             emblem_path="/emblem_sa.svg",
             excluded_transaction_types=(),
             rules=(
@@ -883,31 +883,13 @@ COUNTRY_CONFIGS.update(
                 ),
             ),
             summary_metrics=(
-                rule_group_total("SALES GROSS", "SALES GROSS"),
-                derived_metric("SALES NET", lambda report: report.total_sales / SA_TAX_DIVISOR),
-                derived_metric("EXPENSE", lambda report: report.extra_values.get("expense_total", Decimal("0"))),
-                derived_metric(
-                    "INPUT VAT",
-                    lambda report: report.extra_values.get("expense_total", Decimal("0")) * SA_TAX_RATE,
-                ),
-                derived_metric("OUT VAT", lambda report: report.total_sales / SA_TAX_DIVISOR * SA_TAX_RATE),
-                derived_metric(
-                    "VAT DUE",
-                    lambda report: (
-                        report.total_sales / SA_TAX_DIVISOR * SA_TAX_RATE
-                        - report.extra_values.get("expense_total", Decimal("0")) * SA_TAX_RATE
-                    ),
-                ),
+                rule_group_total("SALES GROSS", "季度应纳税销售额(含税)"),
+                derived_metric("季度不含税销售额", lambda report: report.total_sales / SA_TAX_DIVISOR),
             ),
             card_metrics=(
-                rule_group_total("SALES GROSS", "SALES GROSS"),
-                derived_metric("SALES NET", lambda report: report.total_sales / SA_TAX_DIVISOR),
-                derived_metric("VAT DUE", lambda report: (
-                    report.total_sales / SA_TAX_DIVISOR * SA_TAX_RATE
-                    - report.extra_values.get("expense_total", Decimal("0")) * SA_TAX_RATE
-                )),
+                rule_group_total("SALES GROSS", "应纳税销售额"),
+                derived_metric("不含税销售额", lambda report: report.total_sales / SA_TAX_DIVISOR),
             ),
-            secondary_input_loader=load_sa_expense_values,
         ),
     }
 )
