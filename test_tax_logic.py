@@ -234,6 +234,52 @@ class TaxLogicTests(unittest.TestCase):
             self.assertEqual("180.00", metrics["代扣代缴销售额合计(含税)"])
             self.assertEqual(1, result["row_count"])
 
+    def test_saudi_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            sales_path = self.write_csv(
+                [
+                    {
+                        "fulfillment-channel": "Amazon",
+                        "product sales": "100",
+                        "shipping credits": "20",
+                        "promotional rebates": "-5",
+                        "currency": "SAR",
+                    },
+                    {
+                        "fulfillment-channel": "Merchant",
+                        "product sales": "999",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
+                        "currency": "SAR",
+                    },
+                ],
+                tmpdir,
+                "sa_sales.csv",
+            )
+            expense_path = self.write_csv(
+                [
+                    {"Type": "Subtotal", "Price": "10"},
+                    {"Type": "Total", "Price": "40"},
+                ],
+                tmpdir,
+                "sa_expense.csv",
+            )
+            result = generate_self_tax_report(
+                csv_path=sales_path,
+                country_code="sa",
+                logic_pdf_path=expense_path,
+            )
+            metrics = metric_dict(result, "summary_metrics")
+
+            self.assertEqual("115.00", metrics["SALES GROSS"])
+            self.assertEqual("100.00", metrics["SALES NET"])
+            self.assertEqual("40.00", metrics["EXPENSE"])
+            self.assertEqual("6.00", metrics["INPUT VAT"])
+            self.assertEqual("15.00", metrics["OUT VAT"])
+            self.assertEqual("9.00", metrics["VAT DUE"])
+            self.assertEqual(1, result["row_count"])
+
     def test_render_templates_and_routes(self) -> None:
         home = render_home()
         self.assertIn("/france", home)
@@ -242,25 +288,30 @@ class TaxLogicTests(unittest.TestCase):
         self.assertIn("/germany", home)
         self.assertIn("/italy", home)
         self.assertIn("/netherlands", home)
+        self.assertIn("/saudi", home)
         self.assertIn("/emblem_uk.svg", home)
         self.assertIn("/emblem_nl.svg", home)
+        self.assertIn("/emblem_sa.svg", home)
 
         uk_page = render_country_page("uk")
         de_page = render_country_page("germany")
         it_page = render_country_page("italy")
         nl_page = render_country_page("netherlands")
+        sa_page = render_country_page("saudi")
         self.assertIn("英国税金逻辑 TXT", uk_page)
         self.assertIn(".txt,text/plain", uk_page)
         self.assertIn(".docx,.doc", de_page)
         self.assertIn("意大利税金逻辑 PDF", it_page)
         self.assertIn("荷兰税金逻辑 DOCX", nl_page)
+        self.assertIn("沙特FBA发票或费用文件", sa_page)
+        self.assertIn(".csv,.xlsx", sa_page)
 
         server = make_server("127.0.0.1", 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             base_url = f"http://127.0.0.1:{server.server_port}"
-            for path in ("/healthz", "/france", "/spain", "/uk", "/germany", "/italy", "/netherlands"):
+            for path in ("/healthz", "/france", "/spain", "/uk", "/germany", "/italy", "/netherlands", "/saudi"):
                 with urllib.request.urlopen(f"{base_url}{path}") as response:
                     self.assertEqual(200, response.status)
         finally:

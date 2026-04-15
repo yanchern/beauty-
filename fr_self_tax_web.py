@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "tax_web_data"
 HOME_TEMPLATE_PATH = BASE_DIR / "fr_self_tax_web.html"
 COUNTRY_TEMPLATE_PATH = BASE_DIR / "fr_self_tax_country.html"
-COUNTRY_ORDER = ("fr", "es", "uk", "de", "it", "nl")
+COUNTRY_ORDER = ("fr", "es", "uk", "de", "it", "nl", "sa")
 ALLOWED_EMBLEMS = {Path(COUNTRY_CONFIGS[code].emblem_path).name for code in COUNTRY_ORDER}
 COUNTRY_BY_SLUG = {COUNTRY_CONFIGS[code].slug: COUNTRY_CONFIGS[code] for code in COUNTRY_ORDER}
 
@@ -80,6 +80,7 @@ def render_country_page(slug: str) -> str:
         "__COUNTRY_NAME__": country.name_zh,
         "__COUNTRY_DESCRIPTION__": country.description,
         "__SALES_REPORT_LABEL__": country.sales_report_label,
+        "__SALES_ACCEPT__": country.sales_report_accept,
         "__LOGIC_DOC_LABEL__": country.logic_doc_label,
         "__LOGIC_ACCEPT__": country.logic_doc_accept,
         "__COUNTRY_EMBLEM_SRC__": country.emblem_path,
@@ -223,8 +224,13 @@ class TaxWebHandler(BaseHTTPRequestHandler):
 
         sales_name = safe_filename(str(sales_file.get("filename") or "sales_report.csv"))
         logic_name = safe_filename(str(logic_file.get("filename") or "logic_doc"))
-        if Path(sales_name).suffix.lower() != ".csv":
-            self.send_json({"message": "销售报告必须是 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+        allowed_sales_suffixes = accepted_suffixes(country.sales_report_accept)
+        sales_suffix = Path(sales_name).suffix.lower()
+        if allowed_sales_suffixes and sales_suffix not in allowed_sales_suffixes:
+            self.send_json(
+                {"message": f"{country.sales_report_label} 文件类型不正确，请上传 {', '.join(sorted(allowed_sales_suffixes))}。"},
+                HTTPStatus.BAD_REQUEST,
+            )
             return
 
         allowed_logic_suffixes = accepted_suffixes(country.logic_doc_accept)
@@ -262,7 +268,7 @@ class TaxWebHandler(BaseHTTPRequestHandler):
         notes = [
             f"国家：{result['country_name']}",
             f"销售报告：{sales_name}",
-            f"逻辑文件：{logic_name}",
+            f"{country.logic_doc_label}：{logic_name}",
         ]
         currency_codes = result.get("currency_codes") or []
         currency_label = "/".join(currency_codes) if currency_codes else ""
