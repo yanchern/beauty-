@@ -537,11 +537,7 @@ def sa_rule_amazon_fulfillment(row: dict[str, str], ctx: RuleContext) -> bool:
 
 
 def sa_sales_gross_amount(row: dict[str, str]) -> Decimal:
-    return (
-        row_decimal(row, "product sales")
-        + row_decimal(row, "shipping credits")
-        + row_decimal(row, "promotional rebates")
-    )
+    return row_decimal(row, "BA")
 
 
 def load_sa_expense_values(file_path: Path | None) -> dict[str, Decimal]:
@@ -865,7 +861,7 @@ COUNTRY_CONFIGS.update(
             slug="saudi",
             name_zh="沙特",
             title="沙特季度申报税金计算",
-            description="按沙特税金计算方法汇总季度应纳税销售额。销售文件需包含 fulfillment-channel、product sales、shipping credits、promotional rebates；结果输出 SALES GROSS（含税）和 SALES NET（不含税）。",
+            description="按沙特税金计算方法汇总季度应纳税销售额。销售文件需包含 fulfillment-channel 和 BA 列；筛选 fulfillment-channel=Amazon 后，对 BA 列求和。",
             sales_report_label="沙特销售数据文件",
             sales_report_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             logic_doc_label="沙特税金计算方法",
@@ -877,18 +873,16 @@ COUNTRY_CONFIGS.update(
                     rule_id="SA_SALES_GROSS",
                     logic_group="SALES GROSS",
                     logic_bucket="fulfillment-channel=Amazon",
-                    description="数据表 fulfillment-channel 列筛选 Amazon；SALES GROSS = product sales + shipping credits + promotional rebates。",
+                    description="数据表 fulfillment-channel 列筛选 Amazon；对 BA 列求和，得到 SALES GROSS（应纳税销售额）。",
                     matcher=sa_rule_amazon_fulfillment,
                     amount_getter=sa_sales_gross_amount,
                 ),
             ),
             summary_metrics=(
-                rule_group_total("SALES GROSS", "季度应纳税销售额(含税)"),
-                derived_metric("季度不含税销售额", lambda report: report.total_sales / SA_TAX_DIVISOR),
+                rule_group_total("SALES GROSS", "季度应纳税销售额"),
             ),
             card_metrics=(
                 rule_group_total("SALES GROSS", "应纳税销售额"),
-                derived_metric("不含税销售额", lambda report: report.total_sales / SA_TAX_DIVISOR),
             ),
         ),
     }
@@ -928,9 +922,7 @@ def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow
     if country.code == "sa":
         preferred_headers = (
             "fulfillment-channel",
-            "product sales",
-            "shipping credits",
-            "promotional rebates",
+            "BA",
         )
     for source_row_number, row in enumerate(load_tabular_rows(csv_path, preferred_headers), start=2):
         match = match_country_rule(row, ctx, country)

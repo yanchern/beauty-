@@ -241,16 +241,12 @@ class TaxLogicTests(unittest.TestCase):
                 [
                     {
                         "fulfillment-channel": "Amazon",
-                        "product sales": "100",
-                        "shipping credits": "20",
-                        "promotional rebates": "-5",
+                        "BA": "115",
                         "currency": "SAR",
                     },
                     {
                         "fulfillment-channel": "Merchant",
-                        "product sales": "999",
-                        "shipping credits": "0",
-                        "promotional rebates": "0",
+                        "BA": "999",
                         "currency": "SAR",
                     },
                 ],
@@ -263,8 +259,7 @@ class TaxLogicTests(unittest.TestCase):
             )
             metrics = metric_dict(result, "summary_metrics")
 
-            self.assertEqual("115.00", metrics["季度应纳税销售额(含税)"])
-            self.assertEqual("100.00", metrics["季度不含税销售额"])
+            self.assertEqual("115.00", metrics["季度应纳税销售额"])
             self.assertEqual(1, result["row_count"])
 
     def test_render_templates_and_routes(self) -> None:
