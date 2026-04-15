@@ -7,6 +7,8 @@ import unittest
 import urllib.request
 from pathlib import Path
 
+from openpyxl import Workbook
+
 from fr_self_tax_sales_report import generate_self_tax_report
 from fr_self_tax_web import make_server, render_country_page, render_home
 
@@ -240,27 +242,71 @@ class TaxLogicTests(unittest.TestCase):
             sales_path = self.write_csv(
                 [
                     {
-                        "fulfillment-channel": "Amazon",
-                        "BA": "115",
+                        "fulfillment": "Amazon",
+                        "product sales": "1108.57",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
+                        "total": "1084.75",
                         "currency": "SAR",
                     },
                     {
-                        "fulfillment-channel": "Merchant",
-                        "BA": "999",
+                        "fulfillment": "Amazon",
+                        "product sales": "-1108.57",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
+                        "total": "-1103.03",
+                        "currency": "SAR",
+                    },
+                    {
+                        "fulfillment": "Amazon",
+                        "product sales": "1103.19",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
+                        "total": "1079.39",
+                        "currency": "SAR",
+                    },
+                    {
+                        "fulfillment": "Amazon",
+                        "product sales": "1085.09",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
+                        "total": "1061.38",
+                        "currency": "SAR",
+                    },
+                    {
+                        "fulfillment": "Merchant",
+                        "product sales": "999",
+                        "shipping credits": "0",
+                        "promotional rebates": "0",
                         "currency": "SAR",
                     },
                 ],
                 tmpdir,
                 "sa_sales.csv",
             )
+            logic_path = tmpdir / "sa_method.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Sheet1"
+            ws.append(["沙特税金计算方法", "", ""])
+            ws.append(["步骤①", "数据表fulfillment-channel列筛选Amazon.", ""])
+            ws.append(["步骤②", "SALES GROSS（应纳税销售额）", "=数据表(product sales)+(shipping credits)+(promotional rebates）"])
+            ws.append(["步骤③", "SALES NET（不含税销售额）", "=SALES GROSS/(1+15%)"])
+            ws.append(["步骤④", "EXPENSE", "=FBA发票（Price）列的Total 汇总相加"])
+            wb.save(logic_path)
             result = generate_self_tax_report(
                 csv_path=sales_path,
                 country_code="sa",
+                logic_pdf_path=logic_path,
             )
             metrics = metric_dict(result, "summary_metrics")
 
-            self.assertEqual("115.00", metrics["季度应纳税销售额"])
-            self.assertEqual(1, result["row_count"])
+            self.assertEqual("2188.28", metrics["季度应纳税销售额"])
+            self.assertEqual("1902.85", metrics["季度不含税销售额"])
+            self.assertEqual("0.00", metrics["进项税额"])
+            self.assertEqual("285.43", metrics["销项税额"])
+            self.assertEqual("285.43", metrics["应缴税金"])
+            self.assertEqual(4, result["row_count"])
 
     def test_render_templates_and_routes(self) -> None:
         home = render_home()
