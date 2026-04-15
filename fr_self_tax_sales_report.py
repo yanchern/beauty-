@@ -257,34 +257,73 @@ def country_in_eu(row: dict[str, str], key: str) -> bool:
     return upper_value(row, key) in EU_COUNTRIES
 
 
-def load_tabular_rows(file_path: Path) -> list[dict[str, str]]:
+def select_header_row(
+    matrix: list[list[str]],
+    preferred_headers: tuple[str, ...] | None,
+) -> int | None:
+    if not matrix:
+        return None
+    normalized_targets = {normalize_header(item) for item in (preferred_headers or ()) if item}
+    best_index: int | None = None
+    best_score = -1
+    scan_limit = min(len(matrix), 25)
+    for index in range(scan_limit):
+        row = matrix[index]
+        score = sum(1 for cell in row if normalize_header(cell) in normalized_targets)
+        if score > best_score and any(cell.strip() for cell in row):
+            best_index = index
+            best_score = score
+    if normalized_targets and best_score <= 0:
+        for index, row in enumerate(matrix):
+            if any(cell.strip() for cell in row):
+                return index
+        return None
+    return best_index
+
+
+def build_rows_from_matrix(
+    matrix: list[list[str]],
+    preferred_headers: tuple[str, ...] | None,
+) -> list[dict[str, str]]:
+    header_index = select_header_row(matrix, preferred_headers)
+    if header_index is None:
+        return []
+    headers = matrix[header_index]
+    parsed_rows: list[dict[str, str]] = []
+    for raw_row in matrix[header_index + 1 :]:
+        if not any(value.strip() for value in raw_row):
+            continue
+        row = {
+            headers[index]: raw_row[index] if index < len(raw_row) else ""
+            for index in range(len(headers))
+            if headers[index]
+        }
+        if row:
+            parsed_rows.append(row)
+    return parsed_rows
+
+
+def load_tabular_rows(
+    file_path: Path,
+    preferred_headers: tuple[str, ...] | None = None,
+) -> list[dict[str, str]]:
     suffix = file_path.suffix.lower()
     if suffix == ".csv":
         with file_path.open("r", encoding="utf-8-sig", newline="") as handle:
-            return [dict(row) for row in csv.DictReader(handle)]
+            matrix = [
+                ["" if cell is None else str(cell).strip() for cell in row]
+                for row in csv.reader(handle)
+            ]
+        return build_rows_from_matrix(matrix, preferred_headers)
     if suffix == ".xlsx":
         workbook = load_workbook(file_path, data_only=True, read_only=True)
         all_rows: list[dict[str, str]] = []
         for worksheet in workbook.worksheets:
-            iterator = worksheet.iter_rows(values_only=True)
-            try:
-                header_row = next(iterator)
-            except StopIteration:
-                continue
-            headers = ["" if cell is None else str(cell).strip() for cell in header_row]
-            if not any(headers):
-                continue
-            for raw_row in iterator:
-                values = ["" if cell is None else str(cell).strip() for cell in raw_row]
-                if not any(values):
-                    continue
-                row = {
-                    headers[index]: values[index] if index < len(values) else ""
-                    for index in range(len(headers))
-                    if headers[index]
-                }
-                if row:
-                    all_rows.append(row)
+            matrix = [
+                ["" if cell is None else str(cell).strip() for cell in raw_row]
+                for raw_row in worksheet.iter_rows(values_only=True)
+            ]
+            all_rows.extend(build_rows_from_matrix(matrix, preferred_headers))
         workbook.close()
         return all_rows
     raise ValueError(f"暂不支持的文件类型: {file_path.suffix}")
@@ -508,7 +547,7 @@ def sa_sales_gross_amount(row: dict[str, str]) -> Decimal:
 def load_sa_expense_values(file_path: Path | None) -> dict[str, Decimal]:
     if file_path is None:
         raise ValueError("沙特计算需要上传 FBA 发票或费用文件。")
-    rows = load_tabular_rows(file_path)
+    rows = load_tabular_rows(file_path, preferred_headers=("Price", "Total", "Type", "Description"))
     price_total = Decimal("0")
     total_row_found = False
     for row in rows:
@@ -826,7 +865,7 @@ COUNTRY_CONFIGS.update(
             slug="saudi",
             name_zh="沙特",
             title="沙特季度申报税金计算",
-            description="按沙特方法计算 SALES GROSS、SALES NET、EXPENSE、INPUT VAT、OUT VAT 和 VAT DUE。",
+            description="按沙特方法计算 SALES GROSS、SALES NET、EXPENSE、INPUT VAT、OUT VAT 和 VAT DUE。销售文件需包含 fulfillment-channel、product sales、shipping credits、promotional rebates；费用文件需能识别 Price 和 Total。",
             sales_report_label="沙特销售数据文件",
             sales_report_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             logic_doc_label="沙特FBA发票或费用文件",
@@ -903,7 +942,15 @@ def match_country_rule(
 def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow]:
     matched_rows: list[MatchedRow] = []
     ctx = RuleContext(country_code=country.code)
-    for source_row_number, row in enumerate(load_tabular_rows(csv_path), start=2):
+    preferred_headers = None
+    if country.code == "sa":
+        preferred_headers = (
+            "fulfillment-channel",
+            "product sales",
+            "shipping credits",
+            "promotional rebates",
+        )
+    for source_row_number, row in enumerate(load_tabular_rows(csv_path, preferred_headers), start=2):
         match = match_country_rule(row, ctx, country)
         if not match:
             continue
