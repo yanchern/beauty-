@@ -280,6 +280,11 @@ class TaxLogicTests(unittest.TestCase):
                         "promotional rebates": "0",
                         "currency": "SAR",
                     },
+                    {
+                        "fulfillment": "Amazon",
+                        "BA": "777",
+                        "currency": "SAR",
+                    },
                 ],
                 tmpdir,
                 "sa_sales.csv",

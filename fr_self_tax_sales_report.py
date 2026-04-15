@@ -539,16 +539,11 @@ def sa_rule_amazon_fulfillment(row: dict[str, str], ctx: RuleContext) -> bool:
 
 
 def sa_sales_gross_amount(row: dict[str, str]) -> Decimal:
-    if any(
-        lookup_value(row, candidate) != ""
-        for candidate in ("product sales", "shipping credits", "promotional rebates")
-    ):
-        return (
-            row_decimal(row, "product sales")
-            + row_decimal(row, "shipping credits")
-            + row_decimal(row, "promotional rebates")
-        )
-    return row_decimal(row, "BA")
+    return (
+        row_decimal(row, "product sales")
+        + row_decimal(row, "shipping credits")
+        + row_decimal(row, "promotional rebates")
+    )
 
 
 def load_sa_expense_from_file(file_path: Path) -> Decimal | None:
@@ -900,7 +895,7 @@ COUNTRY_CONFIGS.update(
             slug="saudi",
             name_zh="沙特",
             title="沙特季度申报税金计算",
-            description="按沙特税金计算方法汇总季度应纳税销售额与应缴税金。优先按销售报告中的 fulfillment=Amazon 汇总 product sales、shipping credits、promotional rebates；若为 VAT 报表结构则回退 BA 列。FBA 发票文件可上传整个文件夹，未上传时 EXPENSE 默认记 0。",
+            description="按沙特税金计算方法汇总季度应纳税销售额与应缴税金。仅按销售报告中的 fulfillment=Amazon 汇总 product sales、shipping credits、promotional rebates。FBA 发票文件可上传整个文件夹，未上传时 EXPENSE 默认记 0。",
             sales_report_label="沙特销售数据文件",
             sales_report_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             logic_doc_label="沙特税金计算方法",
@@ -912,7 +907,7 @@ COUNTRY_CONFIGS.update(
                     rule_id="SA_SALES_GROSS",
                     logic_group="SALES GROSS",
                     logic_bucket="fulfillment-channel=Amazon",
-                    description="数据表 fulfillment/fulfillment-channel 筛选 Amazon；SALES GROSS = product sales + shipping credits + promotional rebates，若不存在则回退 BA 列。",
+                    description="数据表 fulfillment/fulfillment-channel 筛选 Amazon；SALES GROSS = product sales + shipping credits + promotional rebates。",
                     matcher=sa_rule_amazon_fulfillment,
                     amount_getter=sa_sales_gross_amount,
                 ),
@@ -985,7 +980,6 @@ def iter_matched_rows(csv_path: Path, country: CountryConfig) -> list[MatchedRow
             "product sales",
             "shipping credits",
             "promotional rebates",
-            "BA",
         )
     for source_row_number, row in enumerate(load_tabular_rows(csv_path, preferred_headers), start=2):
         match = match_country_rule(row, ctx, country)

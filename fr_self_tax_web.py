@@ -313,7 +313,7 @@ class TaxWebHandler(BaseHTTPRequestHandler):
             parsed_invoice_file_count = int(extra_values.get("parsed_invoice_file_count", 0))
             notes.extend(
                 [
-                    "测算逻辑：SALES GROSS = fulfillment=Amazon 的 product sales + shipping credits + promotional rebates；若为 VAT 报表结构则回退 BA 列。",
+                    "测算逻辑：SALES GROSS = fulfillment=Amazon 的 product sales + shipping credits + promotional rebates。",
                     "测算逻辑：SALES NET = SALES GROSS / 1.15；销项税额 = SALES NET * 15%。",
                     "测算逻辑：FBA 发票费用合计 = 全部发票文件中 Price 列 Total 汇总；进项税额 = 费用合计 * 15%。",
                     "测算逻辑：应缴税金 = 销项税额 - 进项税额；未上传发票文件夹时费用按 0 处理。",
