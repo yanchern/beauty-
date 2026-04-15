@@ -303,10 +303,39 @@ class TaxLogicTests(unittest.TestCase):
 
             self.assertEqual("2188.28", metrics["季度应纳税销售额"])
             self.assertEqual("1902.85", metrics["季度不含税销售额"])
+            self.assertEqual("0.00", metrics["FBA发票费用合计"])
             self.assertEqual("0.00", metrics["进项税额"])
             self.assertEqual("285.43", metrics["销项税额"])
             self.assertEqual("285.43", metrics["应缴税金"])
             self.assertEqual(4, result["row_count"])
+
+            invoice_a = self.write_csv(
+                [
+                    {"Type": "Subtotal", "Price": "5"},
+                    {"Type": "Total", "Price": "40"},
+                ],
+                tmpdir,
+                "sa_invoice_a.csv",
+            )
+            invoice_b = self.write_csv(
+                [
+                    {"Type": "Charge", "Price": "1"},
+                    {"Description": "Total", "Price": "10"},
+                ],
+                tmpdir,
+                "sa_invoice_b.csv",
+            )
+            result_with_invoices = generate_self_tax_report(
+                csv_path=sales_path,
+                country_code="sa",
+                logic_pdf_path=logic_path,
+                extra_input_paths=[invoice_a, invoice_b],
+            )
+            metrics_with_invoices = metric_dict(result_with_invoices, "summary_metrics")
+
+            self.assertEqual("50.00", metrics_with_invoices["FBA发票费用合计"])
+            self.assertEqual("7.50", metrics_with_invoices["进项税额"])
+            self.assertEqual("277.93", metrics_with_invoices["应缴税金"])
 
     def test_render_templates_and_routes(self) -> None:
         home = render_home()
@@ -333,6 +362,9 @@ class TaxLogicTests(unittest.TestCase):
         self.assertIn("荷兰税金逻辑 DOCX", nl_page)
         self.assertIn("沙特税金计算方法", sa_page)
         self.assertIn(".xlsx,.xls", sa_page)
+        self.assertIn('name="invoice_files"', sa_page)
+        self.assertIn("webkitdirectory", sa_page)
+        self.assertNotIn('name="invoice_files"', uk_page)
 
         server = make_server("127.0.0.1", 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

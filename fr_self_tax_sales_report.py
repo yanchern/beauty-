@@ -89,7 +89,7 @@ class CountryConfig:
     rules: tuple[RuleSpec, ...]
     summary_metrics: tuple[MetricSpec, ...]
     card_metrics: tuple[MetricSpec, ...]
-    secondary_input_loader: Callable[[Path | None], dict[str, Decimal]] | None = None
+    secondary_input_loader: Callable[[Path | None, list[Path] | None], dict[str, Decimal]] | None = None
 
 
 @dataclass(frozen=True)
@@ -551,15 +551,16 @@ def sa_sales_gross_amount(row: dict[str, str]) -> Decimal:
     return row_decimal(row, "BA")
 
 
-def load_sa_expense_values(file_path: Path | None) -> dict[str, Decimal]:
-    if file_path is None:
-        return {"expense_total": Decimal("0")}
-    rows = load_tabular_rows(file_path, preferred_headers=("Price", "Total", "Type", "Description"))
+def load_sa_expense_from_file(file_path: Path) -> Decimal | None:
+    try:
+        rows = load_tabular_rows(file_path, preferred_headers=("Price", "Total", "Type", "Description"))
+    except Exception:
+        return None
     if not rows:
-        return {"expense_total": Decimal("0")}
+        return None
     normalized_headers = {normalize_header(key) for key in rows[0].keys()}
     if "price" not in normalized_headers:
-        return {"expense_total": Decimal("0")}
+        return None
     price_total = Decimal("0")
     total_row_found = False
     for row in rows:
@@ -567,8 +568,30 @@ def load_sa_expense_values(file_path: Path | None) -> dict[str, Decimal]:
             price_total += row_decimal(row, "Price")
             total_row_found = True
     if not total_row_found:
-        return {"expense_total": Decimal("0")}
-    return {"expense_total": price_total}
+        return None
+    return price_total
+
+
+def load_sa_expense_values(file_path: Path | None, extra_paths: list[Path] | None = None) -> dict[str, Decimal]:
+    candidate_paths: list[Path] = []
+    if file_path is not None:
+        candidate_paths.append(file_path)
+    candidate_paths.extend(extra_paths or [])
+
+    expense_total = Decimal("0")
+    parsed_invoice_file_count = 0
+    for candidate in candidate_paths:
+        amount = load_sa_expense_from_file(candidate)
+        if amount is None:
+            continue
+        expense_total += amount
+        parsed_invoice_file_count += 1
+
+    return {
+        "expense_total": expense_total,
+        "invoice_file_count": Decimal(len(extra_paths or [])),
+        "parsed_invoice_file_count": Decimal(parsed_invoice_file_count),
+    }
 
 
 COUNTRY_CONFIGS.update(
@@ -877,7 +900,7 @@ COUNTRY_CONFIGS.update(
             slug="saudi",
             name_zh="沙特",
             title="沙特季度申报税金计算",
-            description="按沙特税金计算方法汇总季度应纳税销售额与应缴税金。优先按销售报告中的 fulfillment=Amazon 汇总 product sales、shipping credits、promotional rebates；若为 VAT 报表结构则回退 BA 列。",
+            description="按沙特税金计算方法汇总季度应纳税销售额与应缴税金。优先按销售报告中的 fulfillment=Amazon 汇总 product sales、shipping credits、promotional rebates；若为 VAT 报表结构则回退 BA 列。FBA 发票文件可上传整个文件夹，未上传时 EXPENSE 默认记 0。",
             sales_report_label="沙特销售数据文件",
             sales_report_accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             logic_doc_label="沙特税金计算方法",
@@ -897,6 +920,7 @@ COUNTRY_CONFIGS.update(
             summary_metrics=(
                 rule_group_total("SALES GROSS", "季度应纳税销售额"),
                 derived_metric("季度不含税销售额", lambda report: report.total_sales / SA_TAX_DIVISOR),
+                derived_metric("FBA发票费用合计", lambda report: report.extra_values.get("expense_total", Decimal("0"))),
                 derived_metric("进项税额", lambda report: report.extra_values.get("expense_total", Decimal("0")) * SA_TAX_RATE),
                 derived_metric("销项税额", lambda report: report.total_sales / SA_TAX_DIVISOR * SA_TAX_RATE),
                 derived_metric(
@@ -909,7 +933,7 @@ COUNTRY_CONFIGS.update(
             ),
             card_metrics=(
                 rule_group_total("SALES GROSS", "应纳税销售额"),
-                derived_metric("销项税额", lambda report: report.total_sales / SA_TAX_DIVISOR * SA_TAX_RATE),
+                derived_metric("FBA发票费用", lambda report: report.extra_values.get("expense_total", Decimal("0"))),
                 derived_metric(
                     "应缴税金",
                     lambda report: (
@@ -1071,10 +1095,11 @@ def extract_currency_codes(matched_rows: list[MatchedRow]) -> list[str]:
 def load_secondary_values(
     country: CountryConfig,
     secondary_path: Path | None,
+    extra_paths: list[Path] | None = None,
 ) -> dict[str, Decimal]:
     if country.secondary_input_loader is None:
         return {}
-    return country.secondary_input_loader(secondary_path)
+    return country.secondary_input_loader(secondary_path, extra_paths)
 
 
 def autosize_worksheet(ws) -> None:
@@ -1105,6 +1130,13 @@ def build_summary_sheet(
         (f"第二输入文件({report.country.logic_doc_label})", str(logic_doc_path) if logic_doc_path else "未提供"),
         ("命中规则记录数", len(report.matched_rows)),
     ]
+    if report.country.code == "sa":
+        base_rows.extend(
+            [
+                ("FBA发票文件数", int(report.extra_values.get("invoice_file_count", Decimal("0")))),
+                ("已识别的发票文件数", int(report.extra_values.get("parsed_invoice_file_count", Decimal("0")))),
+            ]
+        )
     for row in base_rows:
         ws.append(row)
 
@@ -1251,6 +1283,7 @@ def generate_self_tax_report(
     country_code: str,
     logic_pdf_path: Path | None = None,
     output_path: Path | None = None,
+    extra_input_paths: list[Path] | None = None,
 ) -> dict[str, object]:
     country = get_country_config(country_code)
     csv_path = csv_path.expanduser().resolve()
@@ -1264,7 +1297,7 @@ def generate_self_tax_report(
     output_path = output_path.expanduser().resolve()
 
     matched_rows = iter_matched_rows(csv_path, country)
-    extra_values = load_secondary_values(country, logic_doc_path)
+    extra_values = load_secondary_values(country, logic_doc_path, extra_input_paths)
     report = build_report_data(country, matched_rows, extra_values)
     workbook = build_workbook(report, csv_path, logic_doc_path)
     workbook.save(output_path)
@@ -1285,6 +1318,7 @@ def generate_self_tax_report(
         "card_metrics": card_metrics,
         "currency_codes": currency_codes,
         "total_sales": report.total_sales,
+        "extra_values": report.extra_values,
     }
 
 

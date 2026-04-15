@@ -73,6 +73,16 @@ def render_home() -> str:
 def render_country_page(slug: str) -> str:
     country = COUNTRY_BY_SLUG[slug]
     template = load_template(COUNTRY_TEMPLATE_PATH)
+    extra_upload_block = ""
+    if country.code == "sa":
+        extra_upload_block = """
+          <label class="field">
+            <span class="label">文件入口 3（可选）</span>
+            <span class="title">沙特 FBA 发票文件夹</span>
+            <input type="file" name="invoice_files" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple webkitdirectory directory>
+            <span class="label">可直接选择包含全部 FBA 发票的文件夹；未上传时按 0 处理，不报错。</span>
+          </label>
+""".rstrip()
     replacements = {
         "__COUNTRY_CODE__": country.code,
         "__COUNTRY_SLUG__": country.slug,
@@ -85,28 +95,29 @@ def render_country_page(slug: str) -> str:
         "__LOGIC_ACCEPT__": country.logic_doc_accept,
         "__COUNTRY_EMBLEM_SRC__": country.emblem_path,
         "__COUNTRY_EMBLEM_ALT__": f"{country.name_zh}国徽",
+        "__EXTRA_UPLOAD_BLOCK__": extra_upload_block,
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)
     return template
 
 
-def parse_multipart_form(content_type: str, body: bytes) -> dict[str, dict[str, object]]:
+def parse_multipart_form(content_type: str, body: bytes) -> dict[str, list[dict[str, object]]]:
     message = BytesParser(policy=policy.default).parsebytes(
         f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
     )
-    fields: dict[str, dict[str, object]] = {}
+    fields: dict[str, list[dict[str, object]]] = {}
     for part in message.iter_parts():
         if part.get_content_disposition() != "form-data":
             continue
         field_name = part.get_param("name", header="content-disposition")
         if not field_name:
             continue
-        fields[field_name] = {
+        fields.setdefault(field_name, []).append({
             "filename": part.get_filename() or "",
             "content_type": part.get_content_type(),
             "content": part.get_payload(decode=True) or b"",
-        }
+        })
     return fields
 
 
@@ -216,8 +227,11 @@ class TaxWebHandler(BaseHTTPRequestHandler):
             self.send_json({"message": f"无法解析上传内容：{exc}"}, HTTPStatus.BAD_REQUEST)
             return
 
-        sales_file = fields.get("sales_report")
-        logic_file = fields.get("logic_pdf")
+        sales_files = fields.get("sales_report", [])
+        logic_files = fields.get("logic_pdf", [])
+        invoice_files = fields.get("invoice_files", [])
+        sales_file = sales_files[0] if sales_files else None
+        logic_file = logic_files[0] if logic_files else None
         if not sales_file or not logic_file:
             self.send_json({"message": "请同时上传销售报告和税金逻辑文件。"}, HTTPStatus.BAD_REQUEST)
             return
@@ -242,6 +256,18 @@ class TaxWebHandler(BaseHTTPRequestHandler):
             )
             return
 
+        allowed_invoice_suffixes = {".csv", ".xlsx", ".xls"}
+        if country.code == "sa":
+            for invoice_file in invoice_files:
+                invoice_name = safe_filename(str(invoice_file.get("filename") or "invoice"))
+                invoice_suffix = Path(invoice_name).suffix.lower()
+                if invoice_suffix and invoice_suffix not in allowed_invoice_suffixes:
+                    self.send_json(
+                        {"message": f"沙特 FBA 发票文件夹内仅支持 {', '.join(sorted(allowed_invoice_suffixes))}。"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         session_dir = DATA_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         session_dir.mkdir(parents=True, exist_ok=False)
@@ -249,15 +275,26 @@ class TaxWebHandler(BaseHTTPRequestHandler):
         sales_path = session_dir / sales_name
         logic_path = session_dir / logic_name
         output_path = session_dir / f"{Path(sales_name).stem}_{country.name_zh}税金汇总.xlsx"
+        invoice_paths: list[Path] = []
 
         try:
             sales_path.write_bytes(bytes(sales_file["content"]))
             logic_path.write_bytes(bytes(logic_file["content"]))
+            if country.code == "sa" and invoice_files:
+                invoice_dir = session_dir / "invoice_files"
+                invoice_dir.mkdir(parents=True, exist_ok=True)
+                for index, invoice_file in enumerate(invoice_files, start=1):
+                    raw_name = str(invoice_file.get("filename") or f"invoice_{index}")
+                    invoice_name = f"{index:03d}_{safe_filename(Path(raw_name).name)}"
+                    invoice_path = invoice_dir / invoice_name
+                    invoice_path.write_bytes(bytes(invoice_file["content"]))
+                    invoice_paths.append(invoice_path)
             result = generate_self_tax_report(
                 csv_path=sales_path,
                 country_code=country.code,
                 logic_pdf_path=logic_path,
                 output_path=output_path,
+                extra_input_paths=invoice_paths,
             )
         except Exception as exc:
             shutil.rmtree(session_dir, ignore_errors=True)
@@ -270,6 +307,19 @@ class TaxWebHandler(BaseHTTPRequestHandler):
             f"销售报告：{sales_name}",
             f"{country.logic_doc_label}：{logic_name}",
         ]
+        if country.code == "sa":
+            extra_values = result.get("extra_values") or {}
+            invoice_file_count = int(extra_values.get("invoice_file_count", 0))
+            parsed_invoice_file_count = int(extra_values.get("parsed_invoice_file_count", 0))
+            notes.extend(
+                [
+                    "测算逻辑：SALES GROSS = fulfillment=Amazon 的 product sales + shipping credits + promotional rebates；若为 VAT 报表结构则回退 BA 列。",
+                    "测算逻辑：SALES NET = SALES GROSS / 1.15；销项税额 = SALES NET * 15%。",
+                    "测算逻辑：FBA 发票费用合计 = 全部发票文件中 Price 列 Total 汇总；进项税额 = 费用合计 * 15%。",
+                    "测算逻辑：应缴税金 = 销项税额 - 进项税额；未上传发票文件夹时费用按 0 处理。",
+                    f"FBA 发票文件：已上传 {invoice_file_count} 个，识别成功 {parsed_invoice_file_count} 个。",
+                ]
+            )
         currency_codes = result.get("currency_codes") or []
         currency_label = "/".join(currency_codes) if currency_codes else ""
 
